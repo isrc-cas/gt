@@ -1,0 +1,8 @@
+version: 1.0
+options:
+  server: tls://localhost:443
+  serverCertInsecure: true
+  serverTimeout: 60s
+  service: https://localhost:8443
+  serviceCertInsecure: true
+  serviceTimeout: 180s
