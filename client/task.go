@@ -7,6 +7,7 @@ import (
 	"github.com/isrc-cas/gt/pool"
 	"github.com/isrc-cas/gt/predef"
 	"github.com/rs/zerolog"
+	"io"
 	"net"
 	"sync/atomic"
 	"time"
@@ -223,6 +224,12 @@ func (t *httpTask) process(id uint32, c *conn) {
 			_, werr = c.Write(buf[:6])
 		}
 		pool.BytesPool.Put(buf)
+		if errors.Is(rerr, io.EOF) {
+			rerr = nil
+		}
+		if errors.Is(werr, io.EOF) {
+			werr = nil
+		}
 		if rerr != nil || werr != nil {
 			t.Logger.Debug().AnErr("read err", rerr).AnErr("write err", werr).Msg("process err")
 		}

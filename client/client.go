@@ -5,13 +5,17 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/buger/jsonparser"
 	"github.com/isrc-cas/gt/config"
 	"github.com/isrc-cas/gt/logger"
 	"github.com/isrc-cas/gt/predef"
+	"io"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +28,6 @@ import (
 type Client struct {
 	config       Config
 	logger       zerolog.Logger
-	dialFn       func() (net.Conn, error)
 	initConnMtx  sync.Mutex
 	closing      uint32
 	tunnels      map[*conn]struct{}
@@ -70,11 +73,106 @@ func New(args []string) (c *Client, err error) {
 	return
 }
 
+type dialer struct {
+	host      string
+	tlsConfig *tls.Config
+	dialFn    func() (conn net.Conn, err error)
+}
+
+func (d *dialer) init(c *Client, remote string) (err error) {
+	var u *url.URL
+	u, err = url.Parse(remote)
+	if err != nil {
+		err = fmt.Errorf("remote url (-remote option) '%s' is invalid, cause %s", remote, err.Error())
+		return
+	}
+	switch u.Scheme {
+	case "tls":
+		if len(u.Port()) < 1 {
+			u.Host = net.JoinHostPort(u.Host, "443")
+		}
+		tlsConfig := &tls.Config{
+			PreferServerCipherSuites: true,
+		}
+		if len(c.config.RemoteCert) > 0 {
+			var cf []byte
+			cf, err = ioutil.ReadFile(c.config.RemoteCert)
+			if err != nil {
+				err = fmt.Errorf("failed to read remote cert file (-remoteCert option) '%s', cause %s", c.config.RemoteCert, err.Error())
+				return
+			}
+			roots := x509.NewCertPool()
+			ok := roots.AppendCertsFromPEM(cf)
+			if !ok {
+				err = fmt.Errorf("failed to parse remote cert file (-remoteCert option) '%s'", c.config.RemoteCert)
+				return
+			}
+			tlsConfig.RootCAs = roots
+		}
+		if c.config.RemoteCertInsecure {
+			tlsConfig.InsecureSkipVerify = true
+		}
+		d.host = u.Host
+		d.tlsConfig = tlsConfig
+		d.dialFn = d.tlsDial
+	case "tcp":
+		if len(u.Port()) < 1 {
+			u.Host = net.JoinHostPort(u.Host, "80")
+		}
+		d.host = u.Host
+		d.dialFn = d.dial
+	default:
+		err = fmt.Errorf("remote url (-remote option) '%s' is invalid", remote)
+	}
+	return
+}
+
+func (d *dialer) initWithRemote(c *Client) (err error) {
+	return d.init(c, c.config.Remote)
+}
+
+func (d *dialer) initWithRemoteAPI(c *Client) (err error) {
+	req, err := http.NewRequest("GET", c.config.RemoteAPI, nil)
+	if err != nil {
+		return
+	}
+	query := req.URL.Query()
+	query.Add("network_client_id", c.config.ID)
+	req.URL.RawQuery = query.Encode()
+	req.Header.Set("Request-Id", strconv.FormatInt(time.Now().Unix(), 10))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	r, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		err = fmt.Errorf("invalid http status code %d, body: %s", resp.StatusCode, string(r))
+		return
+	}
+	addr, err := jsonparser.GetString(r, "serverAddress")
+	if err != nil {
+		return
+	}
+	err = d.init(c, addr)
+	return
+}
+
+func (d *dialer) dial() (conn net.Conn, err error) {
+	return net.Dial("tcp", d.host)
+}
+
+func (d *dialer) tlsDial() (conn net.Conn, err error) {
+	return tls.Dial("tcp", d.host, d.tlsConfig)
+}
+
 // Start runs the client agent.
 func (c *Client) Start() (err error) {
 	c.logger.Info().Interface("config", c.config).Msg(predef.Version)
 
-	// TODO: check ID config
 	if len(c.config.ID) < predef.MinIDSize || len(c.config.ID) > predef.MaxIDSize {
 		err = fmt.Errorf("agent id (-id option) '%s' is invalid", c.config.ID)
 		return
@@ -84,69 +182,37 @@ func (c *Client) Start() (err error) {
 		return
 	}
 
-	// 默认 tcp
-	if !strings.Contains(c.config.Remote, "://") {
-		c.config.Remote = "tcp://" + c.config.Remote
+	var dialer dialer
+	if len(c.config.Remote) > 0 {
+		if !strings.Contains(c.config.Remote, "://") {
+			c.config.Remote = "tcp://" + c.config.Remote
+		}
+		err = dialer.initWithRemote(c)
+		if err != nil {
+			return
+		}
 	}
-
-	if !strings.HasPrefix(c.config.Remote, "tls://") &&
-		!strings.HasPrefix(c.config.Remote, "tcp://") {
-		err = fmt.Errorf("remote url (-remote option) '%s' must begin with tcp:// or tls://", c.config.Remote)
+	if len(c.config.RemoteAPI) > 0 {
+		if !strings.HasPrefix(c.config.RemoteAPI, "http://") &&
+			!strings.HasPrefix(c.config.RemoteAPI, "https://") {
+			err = fmt.Errorf("remote api url (-remoteAPI option) '%s' must begin with http:// or https://", c.config.RemoteAPI)
+			return
+		}
+		if len(dialer.host) == 0 {
+			err = dialer.initWithRemoteAPI(c)
+			if err != nil {
+				return
+			}
+		}
+	}
+	if len(dialer.host) == 0 {
+		err = errors.New("option -remote or -remoteAPI must be specified")
 		return
 	}
-	c.config.Remote = strings.TrimSuffix(c.config.Remote, "/")
 
 	if !strings.HasPrefix(c.config.Local, "http://") &&
 		!strings.HasPrefix(c.config.Local, "https://") {
 		err = fmt.Errorf("local url (-local option) '%s' must begin with http:// or https://", c.config.Local)
-		return
-	}
-	c.config.Local = strings.TrimSuffix(c.config.Local, "/")
-
-	config := &tls.Config{
-		PreferServerCipherSuites: true,
-	}
-	if len(c.config.RemoteCert) > 0 {
-		var cf []byte
-		cf, err = ioutil.ReadFile(c.config.RemoteCert)
-		if err != nil {
-			err = fmt.Errorf("failed to read remote cert file (-remoteCert option) '%s', cause %s", c.config.RemoteCert, err.Error())
-			return
-		}
-		roots := x509.NewCertPool()
-		ok := roots.AppendCertsFromPEM(cf)
-		if !ok {
-			err = fmt.Errorf("failed to parse remote cert file (-remoteCert option) '%s'", c.config.RemoteCert)
-			return
-		}
-		config.RootCAs = roots
-	}
-	if c.config.RemoteCertInsecure {
-		config.InsecureSkipVerify = true
-	}
-
-	u, err := url.Parse(c.config.Remote)
-	if err != nil {
-		err = fmt.Errorf("remote url (-remote option) '%s' is invalid, cause %s", c.config.Remote, err.Error())
-		return
-	}
-	switch u.Scheme {
-	case "tls":
-		if len(u.Port()) < 1 {
-			u.Host = net.JoinHostPort(u.Host, "443")
-		}
-		c.dialFn = func() (net.Conn, error) {
-			return tls.Dial("tcp", u.Host, config)
-		}
-	case "tcp":
-		if len(u.Port()) < 1 {
-			u.Host = net.JoinHostPort(u.Host, "80")
-		}
-		c.dialFn = func() (net.Conn, error) {
-			return net.Dial(u.Scheme, u.Host)
-		}
-	default:
-		err = fmt.Errorf("remote url (-remote option) '%s' is invalid", c.config.Remote)
 		return
 	}
 
@@ -157,7 +223,7 @@ func (c *Client) Start() (err error) {
 	}
 
 	for i := uint(0); i < c.config.RemoteConnections; i++ {
-		go c.connect()
+		go c.connect(dialer)
 	}
 	return
 }
@@ -175,11 +241,11 @@ func (c *Client) Close() {
 	c.tunnelsRWMtx.Unlock()
 }
 
-func (c *Client) initConn() (result *conn, err error) {
+func (c *Client) initConn(d dialer) (result *conn, err error) {
 	c.initConnMtx.Lock()
 	defer c.initConnMtx.Unlock()
 
-	conn, err := c.dialFn()
+	conn, err := d.dialFn()
 	if err != nil {
 		return
 	}
@@ -191,10 +257,10 @@ func (c *Client) initConn() (result *conn, err error) {
 	return
 }
 
-func (c *Client) connect() {
+func (c *Client) connect(d dialer) {
 	for {
 		c.logger.Info().Msg("trying to connect to remote")
-		conn, err := c.initConn()
+		conn, err := c.initConn(d)
 		if err == nil {
 			conn.readLoop()
 		} else {
@@ -204,6 +270,12 @@ func (c *Client) connect() {
 			break
 		}
 		time.Sleep(c.config.ReconnectDelay)
+		if len(c.config.RemoteAPI) > 0 {
+			err = d.initWithRemoteAPI(c)
+			if err != nil {
+				c.logger.Error().Err(err).Msg("failed to query server address")
+			}
+		}
 	}
 }
 

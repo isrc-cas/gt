@@ -173,18 +173,9 @@ func (c *conn) handleTunnel() {
 	}
 
 	// 验证 id secret
-	verifyOk := false
-	ud, err := c.server.config.Users.get(idStr)
-	if err == nil && ud.Secret == secretStr {
-		verifyOk = true
-	}
-	// 如果 Users 里面没有就从 apiServer 里面找
-	if !verifyOk && idStr == c.server.apiServer.ID && secretStr == c.server.apiServer.Secret {
-		verifyOk = true
-	}
-	if !verifyOk {
-		c.Logger.Error().Err(err).Msg("failed to verify id and secret")
-		// TODO 返回错误信息给客户端
+	if err := c.server.authUser(idStr, secretStr); err != nil {
+		c.Logger.Debug().Err(err).Msg("invalid id and secret")
+		c.SendErrorSignalInvalidIDAndSecret()
 		return
 	}
 

@@ -1,17 +1,21 @@
 package server
 
 import (
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/buger/jsonparser"
 	"github.com/isrc-cas/gt/config"
 	"github.com/isrc-cas/gt/logger"
 	"github.com/isrc-cas/gt/predef"
 	"github.com/isrc-cas/gt/server/api"
 	"github.com/isrc-cas/gt/server/sync"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -31,6 +35,7 @@ type Server struct {
 	served      uint64
 	tunneling   uint64
 	apiServer   *api.Server
+	authUser    func(id string, secret string) error
 }
 
 // New parses the command line args and creates a Server.
@@ -183,9 +188,18 @@ func (s *Server) acceptLoop(l net.Listener) {
 func (s *Server) Start() (err error) {
 	s.logger.Info().Interface("config", s.config).Msg(predef.Version)
 
-	err = s.config.Users.verify()
-	if err != nil {
-		return
+	if len(s.config.AuthAPI) > 0 {
+		s.authUser = s.authUserWithAPI
+	} else {
+		err = s.config.Users.verify()
+		if err != nil {
+			return
+		}
+		s.authUser = s.authUserWithConfig
+	}
+	if len(s.config.APIAddr) > 0 {
+		apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("src", "apiServer").Logger(), s.config.Users.idConflict)
+		s.apiServer = apiServer
 	}
 
 	var listening bool
@@ -196,11 +210,7 @@ func (s *Server) Start() (err error) {
 		}
 		listening = true
 	}
-	addr, err := net.ResolveTCPAddr("tcp", s.config.Addr)
-	if err != nil {
-		return
-	}
-	if addr.Port > 0 {
+	if len(s.config.Addr) > 0 {
 		err = s.listen()
 		if err != nil {
 			return
@@ -222,17 +232,15 @@ func (s *Server) Start() (err error) {
 }
 
 func (s *Server) startAPIServer() error {
-	apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("src", "apiServer").Logger(), s.config.Users.idConflict)
-	s.apiServer = apiServer
 	ln, err := net.Listen("tcp", s.config.APIAddr)
 	if err != nil {
 		return fmt.Errorf("can not listen on addr '%s', cause %s, please check option 'apiAddr'", s.config.APIAddr, err.Error())
 	}
 	if s.tlsListener != nil {
-		apiServer.RemoteSchema = "tls://"
-		apiServer.RemoteAddr = s.tlsListener.Addr().String()
+		s.apiServer.RemoteSchema = "tls://"
+		s.apiServer.RemoteAddr = s.tlsListener.Addr().String()
 		go func() {
-			err := apiServer.ServeTLS(ln, s.config.CertFile, s.config.KeyFile)
+			err := s.apiServer.ServeTLS(ln, s.config.CertFile, s.config.KeyFile)
 			if errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
@@ -240,16 +248,46 @@ func (s *Server) startAPIServer() error {
 		}()
 		return nil
 	}
-	apiServer.RemoteSchema = "tcp://"
-	apiServer.RemoteAddr = s.listener.Addr().String()
+	s.apiServer.RemoteSchema = "tcp://"
+	s.apiServer.RemoteAddr = s.listener.Addr().String()
 	go func() {
-		err := apiServer.Serve(ln)
+		err := s.apiServer.Serve(ln)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
 		s.logger.Info().Err(err).Msg("api server closed")
 	}()
 	return nil
+}
+
+func (s *Server) authWithAPI(id string, secret string) (ok bool, err error) {
+	var bs bytes.Buffer
+	bs.WriteString(`{"clientId": "`)
+	bs.WriteString(id)
+	bs.WriteString(`", "secretKey": "`)
+	bs.WriteString(secret)
+	bs.WriteString(`"}`)
+	req, err := http.NewRequest("POST", s.config.AuthAPI, &bs)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Request-Id", strconv.FormatInt(time.Now().Unix(), 10))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	r, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		err = fmt.Errorf("invalid http status code %d, body: %s", resp.StatusCode, string(r))
+		return
+	}
+	ok, err = jsonparser.GetBoolean(r, "result")
+	return
 }
 
 // Close stops the server.
@@ -367,4 +405,38 @@ func (s *Server) GetServed() uint64 {
 // GetTunneling returns value of tunneling
 func (s *Server) GetTunneling() uint64 {
 	return atomic.LoadUint64(&s.tunneling)
+}
+
+// ErrInvalidUser is returned if id and secret are invalid
+var ErrInvalidUser = errors.New("invalid user")
+
+func (s *Server) authUserWithConfig(id string, secret string) (err error) {
+	if len(id) < 1 || len(secret) < 1 {
+		err = ErrInvalidUser
+		return
+	}
+	ok := s.config.Users.auth(id, secret)
+	if !ok {
+		if s.apiServer != nil && !s.apiServer.Auth(id, secret) {
+			err = ErrInvalidUser
+		}
+	}
+	return
+}
+
+func (s *Server) authUserWithAPI(id string, secret string) (err error) {
+	if len(id) < 1 || len(secret) < 1 {
+		err = ErrInvalidUser
+		return
+	}
+	ok, err := s.authWithAPI(id, secret)
+	if err != nil {
+		return
+	}
+	if !ok {
+		if s.apiServer != nil && !s.apiServer.Auth(id, secret) {
+			err = ErrInvalidUser
+		}
+	}
+	return
 }

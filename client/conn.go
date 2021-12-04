@@ -145,6 +145,14 @@ func (c *conn) readLoop() {
 			c.client.addTunnel(c)
 			c.Logger.Info().Msg("tunnel started")
 			continue
+		case connection.ErrorSignal:
+			peekBytes, err = c.Reader.Peek(2)
+			if err != nil {
+				return
+			}
+			errCode := uint16(peekBytes[1]) | uint16(peekBytes[0])<<8
+			c.Logger.Info().Err(connection.Error(errCode)).Msg("read error signal")
+			return
 		}
 		peekBytes, err = c.Reader.Peek(2)
 		if err != nil {

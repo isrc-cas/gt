@@ -93,14 +93,33 @@ const (
 	CloseSignal Signal = math.MaxUint32 - 1
 	// ReadySignal is a signal used for ready
 	ReadySignal Signal = math.MaxUint32 - 2
+	// ErrorSignal is a signal used for errors
+	ErrorSignal Signal = math.MaxUint32 - 3
 	// PreservedSignal is a signal used for preserved signals
 	PreservedSignal Signal = math.MaxUint32 - 3000
 )
 
 var (
-	pingBytes  = []byte{0xFF, 0xFF, 0xFF, 0xFF}
-	closeBytes = []byte{0xFF, 0xFF, 0xFF, 0xFE}
-	readyBytes = []byte{0xFF, 0xFF, 0xFF, 0xFD}
+	pingBytes                  = []byte{0xFF, 0xFF, 0xFF, 0xFF}
+	closeBytes                 = []byte{0xFF, 0xFF, 0xFF, 0xFE}
+	readyBytes                 = []byte{0xFF, 0xFF, 0xFF, 0xFD}
+	errInvalidIDAndSecretBytes = []byte{0xFF, 0xFF, 0xFF, 0xFC, 0x00, 0x01}
+)
+
+// Error represents a specific error signal
+type Error uint16
+
+func (e Error) Error() string {
+	switch e {
+	case ErrInvalidIDAndSecret:
+		return "invalid id and secret"
+	}
+	return "unknown error"
+}
+
+const (
+	// ErrInvalidIDAndSecret represents an invalid ID and secret
+	ErrInvalidIDAndSecret Error = 1
 )
 
 // SendPingSignal sends ping signal to the other side
@@ -122,5 +141,11 @@ func (c *Connection) SendCloseSignal() {
 // SendReadySignal sends ready signal to the other side
 func (c *Connection) SendReadySignal() (err error) {
 	_, err = c.Write(readyBytes)
+	return
+}
+
+// SendErrorSignalInvalidIDAndSecret sends ready signal to the other side
+func (c *Connection) SendErrorSignalInvalidIDAndSecret() (err error) {
+	_, err = c.Write(errInvalidIDAndSecretBytes)
 	return
 }

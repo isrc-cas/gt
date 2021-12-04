@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"github.com/isrc-cas/gt/config"
 	"github.com/isrc-cas/gt/predef"
@@ -26,9 +27,10 @@ type Options struct {
 	KeyFile       string `yaml:"keyFile" usage:"The path to key file"`
 
 	// 只用于显示帮助信息，解析结果在 Config.Users
-	ID     config.StringSlice `arg:"id" yaml:"-" usage:"The user id"`
-	Secret config.StringSlice `arg:"secret" yaml:"-" usage:"The secret for user id"`
-	Users  string             `yaml:"users" usage:"The users yaml file to load"`
+	ID      config.StringSlice `arg:"id" yaml:"-" usage:"The user id"`
+	Secret  config.StringSlice `arg:"secret" yaml:"-" usage:"The secret for user id"`
+	Users   string             `yaml:"users" usage:"The users yaml file to load"`
+	AuthAPI string             `yaml:"authAPI" usage:"The API to authenticate with id and secret"`
 
 	Timeout time.Duration `yaml:"timeout" usage:"timeout of connections"`
 
@@ -83,7 +85,7 @@ func (u Users) mergeUsers(usersYaml Users, id, secret []string) error {
 	}
 
 	if len(id) != len(secret) {
-		return fmt.Errorf("the number of id does not match the number of secret")
+		return errors.New("the number of id does not match the number of secret")
 	}
 	for i := 0; i < len(id); i++ {
 		u[id[i]] = UserDetail{
@@ -105,9 +107,16 @@ func (u Users) get(id string) (UserDetail, error) {
 	return UserDetail{}, fmt.Errorf("id not found")
 }
 
+func (u Users) auth(id string, secret string) (ok bool) {
+	if ud, ok := u[id]; ok {
+		return ud.Secret == secret
+	}
+	return
+}
+
 func (u Users) verify() error {
 	if len(u) == 0 {
-		return fmt.Errorf("empty users")
+		return errors.New("empty users")
 	}
 	for id, user := range u {
 		if len(id) < predef.MinIDSize || len(id) > predef.MaxIDSize {

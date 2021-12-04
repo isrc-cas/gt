@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -29,10 +30,27 @@ type Server struct {
 	statusRespCacheTime time.Time
 	statusRespCacheBody *bytes.Reader
 
-	// 用于发送 api 请求
-	ID         string
-	Secret     string
+	id         atomic.Value
+	secret     atomic.Value
 	idConflict func(id string) bool
+}
+
+// ID 返回 api server 生成的 id
+func (s *Server) ID() string {
+	idValue := s.id.Load()
+	if idValue == nil {
+		return ""
+	}
+	return idValue.(string)
+}
+
+// Secret 返回 api server 生成的 secret
+func (s *Server) Secret() string {
+	secretValue := s.secret.Load()
+	if secretValue == nil {
+		return ""
+	}
+	return secretValue.(string)
 }
 
 // NewServer returns an api server instance.
@@ -74,10 +92,11 @@ func (s *Server) statusResp(writer http.ResponseWriter, _ *http.Request) {
 
 func randomString(n int) string {
 	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	r := rand.New(rand.NewSource(time.Now().Unix()))
 
 	s := make([]rune, n)
 	for i := range s {
-		s[i] = letters[rand.Intn(len(letters))]
+		s[i] = letters[r.Intn(len(letters))]
 	}
 	return string(s)
 }
@@ -89,21 +108,31 @@ func (s *Server) randomIDSecret() error {
 		if s.idConflict(id) {
 			continue
 		}
-		s.ID = id
-		s.Secret = randomString(64)
+		s.id.Store(id)
+		s.secret.Store(randomString(64))
 		return nil
 	}
 	return fmt.Errorf("random id and secret still conflict after %v retries", retries)
 }
 
+// Auth 验证是不是 api server 生成的 id 和 secret
+func (s *Server) Auth(id string, secret string) (ok bool) {
+	ok = id == s.ID() && secret == s.Secret()
+	return
+}
+
 func (s *Server) check(writer http.ResponseWriter) (err error) {
+	s.checkTunnelMtx.Lock()
+	defer s.checkTunnelMtx.Unlock()
+
 	err = s.randomIDSecret()
 	if err != nil {
 		return
 	}
-
-	s.checkTunnelMtx.Lock()
-	defer s.checkTunnelMtx.Unlock()
+	defer func() {
+		s.id.Store("")
+		s.secret.Store("")
+	}()
 
 	if !s.statusRespCacheTime.IsZero() && time.Now().Sub(s.statusRespCacheTime) <= 3*time.Minute {
 		_, err = s.statusRespCacheBody.Seek(0, io.SeekStart)
@@ -117,8 +146,8 @@ func (s *Server) check(writer http.ResponseWriter) (err error) {
 
 	cArgs := []string{
 		"client",
-		"-id", s.ID,
-		"-secret", s.Secret,
+		"-id", s.ID(),
+		"-secret", s.Secret(),
 		"-local", "http://" + s.Addr,
 		"-remote", s.RemoteSchema + s.RemoteAddr,
 		"-logLevel", "info",
@@ -157,9 +186,9 @@ func (s *Server) check(writer http.ResponseWriter) (err error) {
 	var url string
 	switch s.RemoteSchema {
 	case "tcp://":
-		url = fmt.Sprintf("http://%v.example.com/statusResp", s.ID)
+		url = fmt.Sprintf("http://%v.example.com/statusResp", s.ID())
 	case "tls://":
-		url = fmt.Sprintf("https://%v.example.com/statusResp", s.ID)
+		url = fmt.Sprintf("https://%v.example.com/statusResp", s.ID())
 	}
 	resp, err := httpClient.Get(url)
 	if err != nil {
@@ -167,6 +196,7 @@ func (s *Server) check(writer http.ResponseWriter) (err error) {
 	}
 	bs, err := io.ReadAll(resp.Body)
 	if err != nil {
+		_ = resp.Body.Close()
 		return
 	}
 	err = resp.Body.Close()

@@ -19,6 +19,7 @@ type Options struct {
 	Secret             string        `yaml:"secret" usage:"The secret used to verify the id"`
 	ReconnectDelay     time.Duration `yaml:"reconnectDelay" usage:"The delay before reconnect"`
 	Remote             string        `yaml:"remote" usage:"The remote server url. Support tcp:// and tls://, default tcp://"`
+	RemoteAPI          string        `yaml:"remoteAPI" usage:"The API to get remote server url"`
 	RemoteCert         string        `yaml:"remoteCert" usage:"The path to remote cert"`
 	RemoteCertInsecure bool          `yaml:"remoteCertInsecure" usage:"Accept self-signed SSL certs from remote"`
 	RemoteConnections  uint          `yaml:"remoteConnections" usage:"The number of connections to server"`
