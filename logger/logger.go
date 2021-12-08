@@ -99,7 +99,7 @@ func Init(options Options) (err error) {
 		}
 		logWriter = io.MultiWriter(logWriter, sentry)
 	}
-	if level <= zerolog.DebugLevel && predef.Debug {
+	if predef.Debug {
 		Logger = zerolog.New(logWriter).With().Caller().Timestamp().Logger().Level(level)
 	} else {
 		Logger = zerolog.New(logWriter).With().Timestamp().Logger().Level(level)

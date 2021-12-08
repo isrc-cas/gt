@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"github.com/isrc-cas/gt/config"
 	"github.com/isrc-cas/gt/predef"
-	"time"
-
 	"github.com/rs/zerolog"
+	"time"
 )
 
 // Config is a server config.
@@ -31,6 +30,8 @@ type Options struct {
 	Secret  config.StringSlice `arg:"secret" yaml:"-" usage:"The secret for user id"`
 	Users   string             `yaml:"users" usage:"The users yaml file to load"`
 	AuthAPI string             `yaml:"authAPI" usage:"The API to authenticate with id and secret"`
+
+	HTTPMUXHeader string `yaml:"httpMUXHeader" usage:"The http multiplexing header to be used"`
 
 	Timeout time.Duration `yaml:"timeout" usage:"timeout of connections"`
 
@@ -64,6 +65,8 @@ func defaultConfig() Config {
 			LogLevel:        zerolog.InfoLevel.String(),
 
 			SentrySampleRate: 1.0,
+
+			HTTPMUXHeader: "Host",
 		},
 	}
 

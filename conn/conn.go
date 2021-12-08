@@ -88,13 +88,14 @@ type Signal = uint32
 
 const (
 	// PingSignal is a signal used for ping
-	PingSignal Signal = math.MaxUint32
+	PingSignal Signal = math.MaxUint32 - iota
 	// CloseSignal is a signal used for close
-	CloseSignal Signal = math.MaxUint32 - 1
+	CloseSignal
 	// ReadySignal is a signal used for ready
-	ReadySignal Signal = math.MaxUint32 - 2
+	ReadySignal
 	// ErrorSignal is a signal used for errors
-	ErrorSignal Signal = math.MaxUint32 - 3
+	ErrorSignal
+
 	// PreservedSignal is a signal used for preserved signals
 	PreservedSignal Signal = math.MaxUint32 - 3000
 )
@@ -118,8 +119,9 @@ func (e Error) Error() string {
 }
 
 const (
+	_ Error = iota
 	// ErrInvalidIDAndSecret represents an invalid ID and secret
-	ErrInvalidIDAndSecret Error = 1
+	ErrInvalidIDAndSecret
 )
 
 // SendPingSignal sends ping signal to the other side

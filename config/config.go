@@ -71,7 +71,7 @@ func copyFlagsValue(dst interface{}, src *flag.FlagSet, name2FieldIndex map[stri
 		}
 		fv := value.Field(i)
 		if fv.Kind() == reflect.Ptr {
-			fv = value.Field(i).Elem()
+			fv = fv.Elem()
 		}
 		nv := reflect.ValueOf(f.Value.(flag.Getter).Get())
 		fvt := fv.Type()

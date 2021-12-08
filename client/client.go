@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -223,7 +224,7 @@ func (c *Client) Start() (err error) {
 	}
 
 	for i := uint(0); i < c.config.RemoteConnections; i++ {
-		go c.connect(dialer)
+		go c.connectLoop(dialer)
 	}
 	return
 }
@@ -257,26 +258,45 @@ func (c *Client) initConn(d dialer) (result *conn, err error) {
 	return
 }
 
-func (c *Client) connect(d dialer) {
-	for {
-		c.logger.Info().Msg("trying to connect to remote")
-		conn, err := c.initConn(d)
-		if err == nil {
-			conn.readLoop()
-		} else {
-			c.logger.Error().Err(err).Msg("failed to connect to remote")
-		}
-		if atomic.LoadUint32(&c.closing) == 1 {
-			break
-		}
-		time.Sleep(c.config.ReconnectDelay)
-		if len(c.config.RemoteAPI) > 0 {
-			err = d.initWithRemoteAPI(c)
-			if err != nil {
-				c.logger.Error().Err(err).Msg("failed to query server address")
+func (c *Client) connect(d dialer) (closing bool) {
+	c.logger.Info().Msg("trying to connect to remote")
+
+	defer func() {
+		if !predef.Debug {
+			if e := recover(); e != nil {
+				c.logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
 			}
 		}
+	}()
+
+	conn, err := c.initConn(d)
+	if err == nil {
+		conn.readLoop()
+	} else {
+		c.logger.Error().Err(err).Msg("failed to connect to remote")
 	}
+
+	if atomic.LoadUint32(&c.closing) == 1 {
+		return true
+	}
+	time.Sleep(c.config.ReconnectDelay)
+
+	if len(c.config.RemoteAPI) > 0 {
+		err = d.initWithRemoteAPI(c)
+		if err != nil {
+			c.logger.Error().Err(err).Msg("failed to query server address")
+		}
+	}
+	return
+}
+
+func (c *Client) connectLoop(d dialer) {
+	for atomic.LoadUint32(&c.closing) == 0 {
+		if c.connect(d) {
+			break
+		}
+	}
+	c.logger.Info().Msg("connect loop exited")
 }
 
 func (c *Client) addTunnel(conn *conn) {

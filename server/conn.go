@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"runtime/debug"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -54,7 +55,7 @@ func (c *conn) handle() {
 		endTime := time.Now()
 		if !predef.Debug {
 			if e := recover(); e != nil {
-				c.Logger.Warn().Msgf("recovered panic: %#v", e)
+				c.Logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
 			}
 		}
 		c.Logger.Info().Dur("cost", endTime.Sub(startTime)).Msg("closed")
@@ -100,18 +101,25 @@ func (c *conn) handleHTTP() {
 		}
 		atomic.AddUint64(&c.server.served, 1)
 	}()
-	r := newPeekHostReader(c.Reader)
-	host, err = r.PeekHost()
-	if err != nil {
-		return
-	}
-	if len(host) < 1 {
-		err = ErrInvalidHTTPProtocol
-		return
-	}
-	id, err := parseIDFromHost(host)
-	if err != nil {
-		return
+	var id []byte
+	if c.server.config.HTTPMUXHeader == "Host" {
+		host, err = peekHost(c.Reader)
+		if err != nil {
+			return
+		}
+		if len(host) < 1 {
+			err = ErrInvalidHTTPProtocol
+			return
+		}
+		id, err = parseIDFromHost(host)
+		if err != nil {
+			return
+		}
+	} else {
+		id, err = peekHeader(c.Reader, c.server.config.HTTPMUXHeader+":")
+		if err != nil {
+			return
+		}
 	}
 	if len(id) < predef.MinIDSize {
 		err = ErrInvalidID
@@ -174,8 +182,8 @@ func (c *conn) handleTunnel() {
 
 	// 验证 id secret
 	if err := c.server.authUser(idStr, secretStr); err != nil {
-		c.Logger.Debug().Err(err).Msg("invalid id and secret")
-		c.SendErrorSignalInvalidIDAndSecret()
+		e := c.SendErrorSignalInvalidIDAndSecret()
+		c.Logger.Debug().Err(err).AnErr("respErr", e).Msg("invalid id and secret")
 		return
 	}
 

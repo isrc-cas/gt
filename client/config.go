@@ -26,6 +26,7 @@ type Options struct {
 	RemoteTimeout      time.Duration `yaml:"remoteTimeout" usage:"The timeout for remote connections"`
 	Local              string        `yaml:"local" usage:"The local service url"`
 	LocalTimeout       time.Duration `yaml:"localTimeout" usage:"The timeout for local connections"`
+	UseLocalAsHTTPHost bool          `yaml:"useLocalAsHTTPHost" usage:"Use the local address as host"`
 
 	SentryDSN         string             `yaml:"sentryDSN" usage:"Sentry DSN to use"`
 	SentryLevel       config.StringSlice `yaml:"sentryLevel" usage:"Sentry levels: trace, debug, info, warn, error, fatal, panic (default [\"error\", \"fatal\", \"panic\"])"`

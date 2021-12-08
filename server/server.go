@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -146,6 +147,11 @@ func (s *Server) listen() (err error) {
 func (s *Server) acceptLoop(l net.Listener) {
 	var err error
 	defer func() {
+		if !predef.Debug {
+			if e := recover(); e != nil {
+				s.logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
+			}
+		}
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
 		}
@@ -187,6 +193,11 @@ func (s *Server) acceptLoop(l net.Listener) {
 // Start runs the server.
 func (s *Server) Start() (err error) {
 	s.logger.Info().Interface("config", s.config).Msg(predef.Version)
+
+	if len(s.config.HTTPMUXHeader) <= 0 {
+		err = fmt.Errorf("HTTP multiplexing header (-httpMUXHeader option) '%s' is invalid", s.config.HTTPMUXHeader)
+		return
+	}
 
 	if len(s.config.AuthAPI) > 0 {
 		s.authUser = s.authUserWithAPI

@@ -47,6 +47,7 @@ func setupServerAndClient(t *testing.T, local string) (*server.Server, *client.C
 		"-local", local,
 		"-remote", fmt.Sprintf("tcp://localhost:%s", port),
 		"-remoteTimeout", "5s",
+		"-useLocalAsHTTPHost",
 	}
 	c, err := client.New(cArgs)
 	if err != nil {

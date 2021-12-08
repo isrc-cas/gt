@@ -9,8 +9,8 @@ const (
 	MinSecretSize = MinIDSize
 	// MaxSecretSize 表示 secret 长度的最大值
 	MaxSecretSize = MaxIDSize
-	// MaxEndingOfHostInHTTPHeaders max ending of host in http headers
-	MaxEndingOfHostInHTTPHeaders = 2 * 1024
+	// MaxHTTPHeaderSize max ending of host in http headers
+	MaxHTTPHeaderSize = 2 * 1024
 )
 
 // OP is the type of operations

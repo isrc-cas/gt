@@ -216,7 +216,9 @@ func (c *conn) dial() (task *httpTask, err error) {
 		return
 	}
 	task = newHTTPTask(conn)
-	err = task.setHost(u.Host)
+	if c.client.config.UseLocalAsHTTPHost {
+		err = task.setHost(u.Host)
+	}
 	return
 }
 
