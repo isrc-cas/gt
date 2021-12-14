@@ -1,10 +1,11 @@
 package config
 
 import (
-	"github.com/rs/zerolog"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 type Config struct {
@@ -15,6 +16,7 @@ type Config struct {
 type Options struct {
 	Config              string        `arg:"config" yaml:"-" usage:"The config file path to load"`
 	ID                  string        `yaml:"id" usage:"The unique id used to connect to server"`
+	Secret              StringSlice   `arg:"secret" yaml:"-" usage:"The secret for user id"`
 	Server              string        `yaml:"server" usage:"The server url"`
 	ServerCert          string        `yaml:"serverCert" usage:"The cert path of server"`
 	ServerCertInsecure  bool          `yaml:"serverCertInsecure" usage:"Accept self-signed SSL certs from the server"`
@@ -69,11 +71,12 @@ func TestParseFlags(t *testing.T) {
 					LogFileMaxCount:     7,
 					LogFileMaxSize:      512 * 1024 * 1024,
 					LogLevel:            zerolog.InfoLevel.String(),
-				}},
+				},
+			},
 		},
 		{
 			"overwrite config",
-			args{[]string{"net", "-config", "testdata/config.yaml", "-server", "tls://localhost:9443", "-logFileMaxCount", "8"}},
+			args{[]string{"net", "-config", "testdata/config.yaml", "-server", "tls://localhost:9443", "-logFileMaxCount", "8", "-secret", "1", "-secret", "2"}},
 			false,
 			Config{
 				Version: "1.0",
@@ -88,7 +91,9 @@ func TestParseFlags(t *testing.T) {
 					LogFileMaxCount:     8,
 					LogFileMaxSize:      512 * 1024 * 1024,
 					LogLevel:            zerolog.InfoLevel.String(),
-				}},
+					Secret:              StringSlice{"1", "2"},
+				},
+			},
 		},
 	}
 	for _, tt := range tests {
