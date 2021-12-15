@@ -73,13 +73,18 @@ func copyFlagsValue(dst interface{}, src *flag.FlagSet, name2FieldIndex map[stri
 		if fv.Kind() == reflect.Ptr {
 			fv = fv.Elem()
 		}
-		nv := reflect.ValueOf(f.Value.(flag.Getter).Get())
 		fvt := fv.Type()
-		if nv.Type().AssignableTo(fvt) {
-			fv.Set(nv)
-		} else {
-			fv.Set(nv.Convert(fvt))
+		nv := reflect.ValueOf(f.Value.(flag.Getter).Get())
+		nvt := nv.Type()
+		if !nvt.AssignableTo(fvt) {
+			if nvt.ConvertibleTo(fvt) {
+				nv = nv.Convert(fvt)
+			} else {
+				err = fmt.Errorf("can't set nv(%v) to fv(%v)", nvt, fvt)
+				return
+			}
 		}
+		fv.Set(nv)
 	})
 	return
 }
