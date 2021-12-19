@@ -5,12 +5,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/buger/jsonparser"
-	"github.com/isrc-cas/gt/config"
-	"github.com/isrc-cas/gt/logger"
-	"github.com/isrc-cas/gt/predef"
-	"github.com/isrc-cas/gt/server/api"
-	"github.com/isrc-cas/gt/server/sync"
 	"io"
 	"net"
 	"net/http"
@@ -21,22 +15,29 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/buger/jsonparser"
+	"github.com/isrc-cas/gt/config"
+	"github.com/isrc-cas/gt/logger"
+	"github.com/isrc-cas/gt/predef"
+	"github.com/isrc-cas/gt/server/api"
+	"github.com/isrc-cas/gt/server/sync"
 	"github.com/rs/zerolog"
 )
 
 // Server is a network agent server.
 type Server struct {
-	config      Config
-	logger      zerolog.Logger
-	id2Agent    sync.Map
-	closing     uint32
-	tlsListener net.Listener
-	listener    net.Listener
-	accepted    uint64
-	served      uint64
-	tunneling   uint64
-	apiServer   *api.Server
-	authUser    func(id string, secret string) error
+	config       Config
+	logger       zerolog.Logger
+	id2Agent     sync.Map
+	closing      uint32
+	tlsListener  net.Listener
+	listener     net.Listener
+	accepted     uint64
+	served       uint64
+	tunneling    uint64
+	apiServer    *api.Server
+	authUser     func(id string, secret string) error
+	removeClient func(id string)
 }
 
 // New parses the command line args and creates a Server.
@@ -201,12 +202,17 @@ func (s *Server) Start() (err error) {
 
 	if len(s.config.AuthAPI) > 0 {
 		s.authUser = s.authUserWithAPI
+		s.removeClient = s.removeClientWithNothing
+	} else if s.config.Users.empty() {
+		s.authUser = s.authUserWithAutoSecret
+		s.removeClient = s.removeClientWithAutoSecret
 	} else {
 		err = s.config.Users.verify()
 		if err != nil {
 			return
 		}
 		s.authUser = s.authUserWithConfig
+		s.removeClient = s.removeClientWithNothing
 	}
 	if len(s.config.APIAddr) > 0 {
 		apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("src", "apiServer").Logger(), s.config.Users.idConflict)
@@ -399,10 +405,6 @@ func (s *Server) getClient(id string) (c *client, ok bool) {
 	return
 }
 
-func (s *Server) removeClient(id string) {
-	s.id2Agent.Delete(id)
-}
-
 // GetAccepted returns value of accepted
 func (s *Server) GetAccepted() uint64 {
 	return atomic.LoadUint64(&s.accepted)
@@ -450,4 +452,30 @@ func (s *Server) authUserWithAPI(id string, secret string) (err error) {
 		}
 	}
 	return
+}
+
+func (s *Server) authUserWithAutoSecret(id, secret string) (err error) {
+	if _, ok := s.config.Users.load(id); ok {
+		if ok = s.config.Users.auth(id, secret); !ok {
+			err = ErrInvalidUser
+		}
+		return
+	}
+
+	if s.apiServer != nil && s.apiServer.Auth(id, secret) {
+		return
+	}
+
+	s.config.Users.store(id, UserDetail{secret})
+	err = s.config.Users.verify()
+	return
+}
+
+func (s *Server) removeClientWithNothing(id string) {
+	s.id2Agent.Delete(id)
+}
+
+func (s *Server) removeClientWithAutoSecret(id string) {
+	s.id2Agent.Delete(id)
+	s.config.Users.delete(id)
 }

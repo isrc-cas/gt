@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
-	"strconv"
 	"testing"
 	"time"
 
@@ -18,25 +16,25 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/isrc-cas/gt/client"
 	"github.com/isrc-cas/gt/server"
+	"github.com/isrc-cas/gt/util"
 )
 
-func randomPort() string {
-	n := rand.Int31n(10000)
-	n += 10000
-	return strconv.FormatInt(int64(n), 10)
-}
+const defaultClientLocal = "http://www.baidu.com"
 
-func setupServerAndClient(t *testing.T, local string) (*server.Server, *client.Client, string) {
+func setupServerAndClient(t *testing.T, local string, sArgs, cArgs []string) (*server.Server, *client.Client, string) {
 	if local == "" {
-		local = "http://www.baidu.com"
+		local = defaultClientLocal
 	}
-	port := randomPort()
-	sArgs := []string{
-		"server",
-		"-addr", port,
-		"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
-		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
-		"-timeout", "10s",
+
+	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
+	if len(sArgs) == 0 {
+		sArgs = []string{
+			"server",
+			"-addr", serverAddr,
+			"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
+			"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
+			"-timeout", "10s",
+		}
 	}
 	s, err := server.New(sArgs)
 	if err != nil {
@@ -46,14 +44,17 @@ func setupServerAndClient(t *testing.T, local string) (*server.Server, *client.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	cArgs := []string{
-		"client",
-		"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
-		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
-		"-local", local,
-		"-remote", fmt.Sprintf("tcp://localhost:%s", port),
-		"-remoteTimeout", "5s",
-		"-useLocalAsHTTPHost",
+
+	if len(cArgs) == 0 {
+		cArgs = []string{
+			"client",
+			"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
+			"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
+			"-local", local,
+			"-remote", serverAddr,
+			"-remoteTimeout", "5s",
+			"-useLocalAsHTTPHost",
+		}
 	}
 	c, err := client.New(cArgs)
 	if err != nil {
@@ -68,7 +69,7 @@ func setupServerAndClient(t *testing.T, local string) (*server.Server, *client.C
 		t.Fatal(err)
 	}
 
-	return s, c, port
+	return s, c, serverAddr
 }
 
 func setupHTTPClient(addr string) *http.Client {
@@ -93,12 +94,12 @@ func setupHTTPClient(addr string) *http.Client {
 }
 
 func TestServerAndClient(t *testing.T) {
-	s, c, port := setupServerAndClient(t, "")
+	s, c, serverAddr := setupServerAndClient(t, "", nil, nil)
 	defer func() {
 		c.Close()
 		s.Close()
 	}()
-	httpClient := setupHTTPClient(net.JoinHostPort("localhost", port))
+	httpClient := setupHTTPClient(serverAddr)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +133,7 @@ func TestClientAndServerWithLocalServer(t *testing.T) {
 	})
 	hs := &http.Server{Handler: mux}
 
-	port := randomPort()
+	port := util.RandomPort()
 	hsu := net.JoinHostPort("localhost", port)
 	l, err := net.Listen("tcp", hsu)
 	if err != nil {
@@ -150,12 +151,12 @@ func TestClientAndServerWithLocalServer(t *testing.T) {
 			panic(err)
 		}
 	}()
-	s, c, port := setupServerAndClient(t, fmt.Sprintf("http://%s", hsu))
+	s, c, serverAddr := setupServerAndClient(t, fmt.Sprintf("http://%s", hsu), nil, nil)
 	defer func() {
 		c.Close()
 		s.Close()
 	}()
-	httpClient := setupHTTPClient(net.JoinHostPort("localhost", port))
+	httpClient := setupHTTPClient(serverAddr)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com/test?hello=world")
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +210,7 @@ func TestClientAndServerWithLocalWebsocket(t *testing.T) {
 	mux.HandleFunc("/test", echo)
 	hs := &http.Server{Handler: mux}
 
-	port := randomPort()
+	port := util.RandomPort()
 	hsu := net.JoinHostPort("localhost", port)
 	l, err := net.Listen("tcp", hsu)
 	if err != nil {
@@ -227,18 +228,17 @@ func TestClientAndServerWithLocalWebsocket(t *testing.T) {
 			panic(err)
 		}
 	}()
-	s, c, port := setupServerAndClient(t, fmt.Sprintf("http://%s", hsu))
+	s, c, serverAddr := setupServerAndClient(t, fmt.Sprintf("http://%s", hsu), nil, nil)
 	defer func() {
 		c.Close()
 		s.Close()
 	}()
 
 	dialFn := func(ctx context.Context, network string, address string) (net.Conn, error) {
-		address = net.JoinHostPort("localhost", port)
 		return (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
-		}).DialContext(ctx, network, address)
+		}).DialContext(ctx, network, serverAddr)
 	}
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
@@ -298,7 +298,7 @@ FOR:
 }
 
 func TestPing(t *testing.T) {
-	s, c, _ := setupServerAndClient(t, "")
+	s, c, _ := setupServerAndClient(t, "", nil, nil)
 	defer func() {
 		c.Close()
 		s.Close()
@@ -311,15 +311,13 @@ func TestPing(t *testing.T) {
 }
 
 func TestAPIStatus(t *testing.T) {
-	port := randomPort()
+	port := util.RandomPort()
 	apiAddr := net.JoinHostPort("localhost", port)
-	port = randomPort()
+	port = util.RandomPort()
 	sArgs := []string{
 		"server",
 		"-addr", port,
 		"-apiAddr", apiAddr,
-		"-id", "status", // 这里的 id secret 可以随便设置，因为 API 使用的 id secret 每次使用都会随机生成，但服务端的 users 不能为空
-		"-secret", "status",
 	}
 	s, err := server.New(sArgs)
 	if err != nil {
@@ -368,19 +366,18 @@ func TestAPIStatus(t *testing.T) {
 
 func TestAuthAPI(t *testing.T) {
 	// 模拟 AuthAPI
-	authAddr := "localhost:" + randomPort()
+	authAddr := net.JoinHostPort("localhost", util.RandomPort())
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
 			all, err := io.ReadAll(r.Body)
 			if err != nil {
-				panic(err) // 不允许使用 t.Fatal()
+				panic(err)
 			}
 			id, _ := jsonparser.GetString(all, "clientId")
 			secret, _ := jsonparser.GetString(all, "secretKey")
 			if id != "05797ac9-86ae-40b0-b767-7a41e03a5486" || secret != "eec1eabf-2c59-4e19-bf10-34707c17ed89" {
-				err = errors.New("invalid id or secret")
-				panic(err)
+				panic("invalid id or secret")
 			}
 			_, err = rw.Write([]byte("{\"result\":true}"))
 			if err != nil {
@@ -397,44 +394,131 @@ func TestAuthAPI(t *testing.T) {
 	}()
 	time.Sleep(100 * time.Millisecond)
 
-	// 启动服务端
-	serverAddr := "localhost:" + randomPort()
-	sArgs := []string{
+	// 启动服务端、客户端
+	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
+	s, c, _ := setupServerAndClient(t, "", []string{
 		"server",
 		"-addr", serverAddr,
 		"-authAPI=http://" + authAddr + "/",
-	}
-	s, err := server.New(sArgs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = s.Start()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// 启动客户端
-	cArgs := []string{
+	}, []string{
 		"client",
 		"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
 		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
-		"-local=http://www.baidu.com",
+		"-local", defaultClientLocal,
 		"-remote", serverAddr,
 		"-remoteTimeout", "5s",
 		"-useLocalAsHTTPHost",
-	}
-	c, err := client.New(cArgs)
+	})
+	defer func() {
+		c.Close()
+		s.Close()
+	}()
+
+	// 通过 http 测试
+	httpClient := setupHTTPClient(serverAddr)
+	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = c.Start()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal("invalid status code")
+	}
+	all, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = c.WaitUntilReady(30 * time.Second)
+	t.Logf("%s", all)
+}
+
+func TestRemoteAPI(t *testing.T) {
+	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
+
+	// 模拟 RemoteAPI
+	remoteAPIAddr := net.JoinHostPort("localhost", util.RandomPort())
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+			requestID := r.Header.Get("Request-Id")
+			if requestID == "" {
+				panic("invalid Request-Id")
+			}
+
+			id := r.URL.Query().Get("network_client_id")
+			if id != "05797ac9-86ae-40b0-b767-7a41e03a5486" {
+				panic("invalid id")
+			}
+
+			_, err := rw.Write([]byte("{\"serverAddress\":\"tcp://" + serverAddr + "\"}"))
+			if err != nil {
+				panic(err)
+			}
+		})
+		httpServer := http.Server{
+			Addr:    remoteAPIAddr,
+			Handler: mux,
+		}
+		if err := httpServer.ListenAndServe(); err != nil {
+			panic(err)
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// 启动服务端、客户端
+	s, c, _ := setupServerAndClient(t, "", []string{
+		"server",
+		"-addr", serverAddr,
+		"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
+		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
+	}, []string{
+		"client",
+		"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
+		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
+		"-local", defaultClientLocal,
+		"-remoteAPI=http://" + remoteAPIAddr + "/",
+		"-remoteTimeout", "5s",
+		"-useLocalAsHTTPHost",
+	})
+	defer func() {
+		c.Close()
+		s.Close()
+	}()
+
+	// 通过 http 测试
+	httpClient := setupHTTPClient(serverAddr)
+	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal("invalid status code")
+	}
+	all, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s", all)
+}
+
+func TestAutoSecret(t *testing.T) {
+	// 启动服务端、客户端
+	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
+	s, c, _ := setupServerAndClient(t, "", []string{
+		"server",
+		"-addr", serverAddr,
+	}, []string{
+		"client",
+		"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
+		"-local", defaultClientLocal,
+		"-remote", serverAddr,
+		"-remoteTimeout", "5s",
+		"-useLocalAsHTTPHost",
+	})
+	defer func() {
+		c.Close()
+		s.Close()
+	}()
 
 	// 通过 http 测试
 	httpClient := setupHTTPClient(serverAddr)
