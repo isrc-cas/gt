@@ -5,10 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/buger/jsonparser"
-	"github.com/isrc-cas/gt/config"
-	"github.com/isrc-cas/gt/logger"
-	"github.com/isrc-cas/gt/predef"
 	"io"
 	"io/ioutil"
 	"net"
@@ -22,6 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/buger/jsonparser"
+	"github.com/isrc-cas/gt/config"
+	"github.com/isrc-cas/gt/logger"
+	"github.com/isrc-cas/gt/predef"
+	"github.com/isrc-cas/gt/util"
 	"github.com/rs/zerolog"
 )
 
@@ -178,7 +179,9 @@ func (c *Client) Start() (err error) {
 		err = fmt.Errorf("agent id (-id option) '%s' is invalid", c.config.ID)
 		return
 	}
-	if len(c.config.Secret) < predef.MinSecretSize || len(c.config.Secret) > predef.MaxSecretSize {
+	if c.config.Secret == "" {
+		c.config.Secret = util.RandomString(predef.DefaultSecretSize)
+	} else if len(c.config.Secret) < predef.MinSecretSize || len(c.config.Secret) > predef.MaxSecretSize {
 		err = fmt.Errorf("agent secret (-secret option) '%s' is invalid", c.config.Secret)
 		return
 	}

@@ -4,16 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/isrc-cas/gt/client"
-	"github.com/isrc-cas/gt/predef"
 	"io"
-	"math/rand"
 	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/isrc-cas/gt/client"
+	"github.com/isrc-cas/gt/predef"
+	"github.com/isrc-cas/gt/util"
 	"github.com/rs/zerolog"
 )
 
@@ -90,26 +90,15 @@ func (s *Server) statusResp(writer http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func randomString(n int) string {
-	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-	r := rand.New(rand.NewSource(time.Now().Unix()))
-
-	s := make([]rune, n)
-	for i := range s {
-		s[i] = letters[r.Intn(len(letters))]
-	}
-	return string(s)
-}
-
 func (s *Server) randomIDSecret() error {
 	retries := 10
 	for i := 0; i < retries; i++ {
-		id := randomString(64)
+		id := util.RandomString(predef.DefaultIDSize)
 		if s.idConflict(id) {
 			continue
 		}
 		s.id.Store(id)
-		s.secret.Store(randomString(64))
+		s.secret.Store(util.RandomString(predef.DefaultSecretSize))
 		return nil
 	}
 	return fmt.Errorf("random id and secret still conflict after %v retries", retries)

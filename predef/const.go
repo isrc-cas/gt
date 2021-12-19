@@ -5,10 +5,14 @@ const (
 	MinIDSize = 1
 	// MaxIDSize is the maximum size of ID
 	MaxIDSize = 200
+	// DefaultIDSize ID 的默认长度
+	DefaultIDSize = 64
 	// MinSecretSize 表示 secret 长度的最小值
 	MinSecretSize = MinIDSize
 	// MaxSecretSize 表示 secret 长度的最大值
 	MaxSecretSize = MaxIDSize
+	// DefaultSecretSize secret 的默认长度
+	DefaultSecretSize = DefaultIDSize
 	// MaxHTTPHeaderSize max ending of host in http headers
 	MaxHTTPHeaderSize = 2 * 1024
 )

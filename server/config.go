@@ -3,10 +3,11 @@ package server
 import (
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/isrc-cas/gt/config"
 	"github.com/isrc-cas/gt/predef"
 	"github.com/rs/zerolog"
-	"time"
 )
 
 // Config is a server config.
@@ -99,15 +100,23 @@ func (u Users) mergeUsers(usersYaml Users, id, secret []string) error {
 	return nil
 }
 
-func (u Users) set(id string, ud UserDetail) {
+func (u Users) store(id string, ud UserDetail) {
 	u[id] = ud
 }
 
-func (u Users) get(id string) (UserDetail, error) {
+func (u Users) load(id string) (UserDetail, bool) {
 	if ud, ok := u[id]; ok {
-		return ud, nil
+		return ud, true
 	}
-	return UserDetail{}, fmt.Errorf("id not found")
+	return UserDetail{}, false
+}
+
+func (u Users) delete(id string) {
+	delete(u, id)
+}
+
+func (u Users) empty() bool {
+	return len(u) == 0
 }
 
 func (u Users) auth(id string, secret string) (ok bool) {
@@ -118,9 +127,6 @@ func (u Users) auth(id string, secret string) (ok bool) {
 }
 
 func (u Users) verify() error {
-	if len(u) == 0 {
-		return errors.New("empty users")
-	}
 	for id, user := range u {
 		if len(id) < predef.MinIDSize || len(id) > predef.MaxIDSize {
 			return fmt.Errorf("id length invalid: '%s'", id)
