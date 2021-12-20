@@ -13,9 +13,9 @@
 
 - [工作原理](#工作原理)
 - [示例](#示例)
-  - [HTTP 内网穿透](#HTTP-内网穿透)
-  - [HTTPS 内网穿透](#HTTPS-内网穿透)
-  - [TLS 加密客户端服务端之间的 HTTP](#TLS-加密客户端服务端之间的-HTTP)
+  - [HTTP 内网穿透](#http-内网穿透)
+  - [HTTPS 内网穿透](#https-内网穿透)
+  - [TLS 加密客户端服务端之间的 HTTP](#tls-加密客户端服务端之间的-http)
 - [参数](#参数)
   - [客户端参数](#客户端参数)
   - [服务端参数](#服务端参数)
@@ -227,11 +227,11 @@ options:
 第 i 个 id 与第 i 个 secret 相匹配。下面两种启动方式是等价的。
 
 ```shell
-./release/server -port 8080 -id id1 -secret secret1 -id id2 -secret secret2
+./release/server -addr 8080 -id id1 -secret secret1 -id id2 -secret secret2
 ```
 
 ```shell
-./release/server -port 8080 -id id1 -id id2 -secret secret1 -secret secret2
+./release/server -addr 8080 -id id1 -id id2 -secret secret1 -secret secret2
 ```
 
 ![img](./doc/image/服务端命令行users.png)
@@ -264,9 +264,9 @@ options:
   logFileMaxCount: 1234
   logFileMaxSize: 1234
   logLevel: debug
-  port: 1234
+  addr: 1234
   timeout: 1234m1234ms
-  tlsPort: 1234
+  tlsAddr: 1234
   tlsVersion: tls1.3
   users: testdata/users.yaml
 ```
