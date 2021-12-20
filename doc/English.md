@@ -232,11 +232,11 @@ top to bottom.
 The i-th id matches the i-th secret. The following two startup methods are equivalent.
 
 ```shell
-./release/server -port 8080 -id id1 -secret secret1 -id id2 -secret secret2
+./release/server -addr 8080 -id id1 -secret secret1 -id id2 -secret secret2
 ```
 
 ```shell
-./release/server -port 8080 -id id1 -id id2 -secret secret1 -secret secret2
+./release/server -addr 8080 -id id1 -id id2 -secret secret1 -secret secret2
 ```
 
 #### Through The Users Configuration File
@@ -267,9 +267,9 @@ options:
   logFileMaxCount: 1234
   logFileMaxSize: 1234
   logLevel: debug
-  port: 1234
+  addr: 1234
   timeout: 1234m1234ms
-  tlsPort: 1234
+  tlsAddr: 1234
   tlsVersion: tls1.3
   users: testdata/users.yaml
 ```
