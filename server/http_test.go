@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"github.com/isrc-cas/gt/bufio"
+	"github.com/isrc-cas/gt/util"
 	"io"
-	"math/rand"
 	"strings"
 	"testing"
 )
@@ -71,27 +71,8 @@ func TestPeekHostReaderNoHost(t *testing.T) {
 	t.Logf("value: %s, err: %s", value, err)
 }
 
-var defaultLetters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-
-func randomString(n int, allowedChars ...[]rune) string {
-	var letters []rune
-
-	if len(allowedChars) == 0 {
-		letters = defaultLetters
-	} else {
-		letters = allowedChars[0]
-	}
-
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
-	}
-
-	return string(b)
-}
-
 func TestPeekHostReaderInvalidHeaders(t *testing.T) {
-	text := randomString(17 * 1024)
+	text := util.RandomString(17 * 1024)
 	host, err := peekHost(bufio.NewReaderSize(strings.NewReader(text), 20*1024))
 	if err == nil || !errors.Is(err, ErrInvalidHTTPProtocol) {
 		t.Fatal()

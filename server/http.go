@@ -70,7 +70,7 @@ func peekHeader(reader *bufio.Reader, target string) (value []byte, err error) {
 }
 
 func parseIDFromHost(host []byte) (id []byte, err error) {
-	i := bytes.Index(host, []byte{'.'})
+	i := bytes.IndexByte(host, '.')
 	if i < 0 {
 		err = ErrInvalidHost
 		return
@@ -79,7 +79,7 @@ func parseIDFromHost(host []byte) (id []byte, err error) {
 		err = ErrInvalidHost
 		return
 	}
-	if bytes.Index(host[i+1:], []byte{'.'}) <= 0 {
+	if bytes.IndexByte(host[i+1:], '.') <= 0 {
 		err = ErrInvalidHost
 		return
 	}

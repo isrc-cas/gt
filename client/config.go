@@ -2,6 +2,7 @@ package client
 
 import (
 	"github.com/isrc-cas/gt/config"
+	"github.com/isrc-cas/gt/predef"
 	"github.com/rs/zerolog"
 	"time"
 )
@@ -55,6 +56,7 @@ func defaultConfig() Config {
 			LogLevel:          zerolog.InfoLevel.String(),
 
 			SentrySampleRate: 1.0,
+			SentryRelease:    predef.Version,
 		},
 	}
 }

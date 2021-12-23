@@ -8,10 +8,10 @@ import (
 
 // RandomString 随机字符串
 func RandomString(n int) string {
-	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	letters := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 
-	s := make([]rune, n)
+	s := make([]byte, n)
 	for i := range s {
 		s[i] = letters[r.Intn(len(letters))]
 	}

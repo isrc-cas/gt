@@ -66,6 +66,7 @@ func defaultConfig() Config {
 			LogLevel:        zerolog.InfoLevel.String(),
 
 			SentrySampleRate: 1.0,
+			SentryRelease:    predef.Version,
 
 			HTTPMUXHeader: "Host",
 		},

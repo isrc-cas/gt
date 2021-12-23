@@ -61,17 +61,6 @@ func New(args []string) (s *Server, err error) {
 		return
 	}
 
-	// 裸端口支持
-	if !strings.Contains(conf.Addr, ":") {
-		conf.Addr = ":" + conf.Addr
-	}
-	if !strings.Contains(conf.TLSAddr, ":") {
-		conf.TLSAddr = ":" + conf.TLSAddr
-	}
-	if !strings.Contains(conf.APIAddr, ":") {
-		conf.APIAddr = ":" + conf.APIAddr
-	}
-
 	err = logger.Init(logger.Options{
 		FilePath:          conf.LogFile,
 		RotationCount:     conf.LogFileMaxCount,
@@ -221,6 +210,9 @@ func (s *Server) Start() (err error) {
 
 	var listening bool
 	if len(s.config.TLSAddr) > 0 && len(s.config.CertFile) > 0 && len(s.config.KeyFile) > 0 {
+		if strings.IndexByte(s.config.TLSAddr, ':') == -1 {
+			s.config.TLSAddr = ":" + s.config.TLSAddr
+		}
 		err = s.tlsListen()
 		if err != nil {
 			return
@@ -228,6 +220,9 @@ func (s *Server) Start() (err error) {
 		listening = true
 	}
 	if len(s.config.Addr) > 0 {
+		if strings.IndexByte(s.config.Addr, ':') == -1 {
+			s.config.Addr = ":" + s.config.Addr
+		}
 		err = s.listen()
 		if err != nil {
 			return
@@ -240,6 +235,9 @@ func (s *Server) Start() (err error) {
 	}
 
 	if len(s.config.APIAddr) > 0 {
+		if strings.IndexByte(s.config.APIAddr, ':') == -1 {
+			s.config.APIAddr = ":" + s.config.APIAddr
+		}
 		err = s.startAPIServer()
 		if err != nil {
 			return
