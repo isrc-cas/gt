@@ -55,7 +55,7 @@ func (c *Connection) Close() {
 // CloseOnce closes Connection
 func (c *Connection) CloseOnce() {
 	err := c.Conn.Close()
-	c.Logger.Debug().Err(err).Msg("conn close")
+	c.Logger.Info().Err(err).Msg("conn close")
 }
 
 // IsClosing tells is the server stopping.

@@ -96,6 +96,9 @@ func (c *conn) Close() {
 	pool.PutReader(c.Reader)
 }
 
+// OnTunnelClose used for test only.
+var OnTunnelClose atomic.Value
+
 func (c *conn) readLoop() {
 	var err error
 	var pings int
@@ -106,6 +109,14 @@ func (c *conn) readLoop() {
 		}
 		c.Close()
 		c.Logger.Info().Err(err).Int("pings", pings).Msg("tunnel closed")
+		if predef.Debug {
+			cb := OnTunnelClose.Load()
+			if cb != nil {
+				if cb, ok := cb.(func()); ok {
+					cb()
+				}
+			}
+		}
 	}()
 
 	r := &bufio.LimitedReader{}
@@ -176,12 +187,23 @@ func (c *conn) readLoop() {
 			}
 			r.Reader = c.Reader
 			r.N = int64(l)
-			err = c.processData(id, r)
-			if err != nil {
+			rErr, wErr := c.processData(id, r)
+			if rErr != nil {
+				err = wErr
 				if !errors.Is(err, net.ErrClosed) {
-					c.Logger.Warn().Err(err).Msg("failed to processData")
+					c.Logger.Warn().Err(err).Msg("failed to read data in processData")
 				}
 				return
+			}
+			if wErr != nil {
+				if !errors.Is(wErr, net.ErrClosed) {
+					c.Logger.Warn().Err(wErr).Msg("failed to write data in processData")
+				}
+				_, err = r.Discard(int(r.N))
+				if err != nil {
+					return
+				}
+				continue
 			}
 		case predef.Close:
 			c.tasksRWMtx.RLock()
@@ -222,7 +244,7 @@ func (c *conn) dial() (task *httpTask, err error) {
 	return
 }
 
-func (c *conn) processData(id uint32, r *bufio.LimitedReader) (err error) {
+func (c *conn) processData(id uint32, r *bufio.LimitedReader) (readErr, writeErr error) {
 	c.tasksRWMtx.RLock()
 	t, ok := c.tasks[id]
 	c.tasksRWMtx.RUnlock()
@@ -230,10 +252,10 @@ func (c *conn) processData(id uint32, r *bufio.LimitedReader) (err error) {
 		c.tasksRWMtx.Lock()
 		t, ok = c.tasks[id]
 		if !ok {
-			t, err = c.dial()
-			if err != nil {
+			t, writeErr = c.dial()
+			if writeErr != nil {
 				c.tasksRWMtx.Unlock()
-				return err
+				return
 			}
 			c.tasks[id] = t
 			c.tasksRWMtx.Unlock()
@@ -244,6 +266,18 @@ func (c *conn) processData(id uint32, r *bufio.LimitedReader) (err error) {
 			go t.process(id, c)
 		}
 	}
-	_, err = r.WriteTo(t)
+	_, err := r.WriteTo(t)
+	if err != nil {
+		if oe, ok := err.(*net.OpError); ok {
+			switch oe.Op {
+			case "write":
+				writeErr = err
+			default:
+				readErr = err
+			}
+		} else {
+			readErr = err
+		}
+	}
 	return
 }

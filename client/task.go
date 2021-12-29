@@ -214,30 +214,29 @@ func (t *httpTask) Close() {
 
 func (t *httpTask) process(id uint32, c *conn) {
 	atomic.AddUint32(&c.TasksCount, 1)
-	var rerr error
-	var werr error
+	var rErr error
+	var wErr error
 	buf := pool.BytesPool.Get().([]byte)
 	defer func() {
-		if werr == nil {
+		if wErr == nil {
 			binary.BigEndian.PutUint32(buf[0:], id)
 			binary.BigEndian.PutUint16(buf[4:], predef.Close)
-			_, werr = c.Write(buf[:6])
+			_, wErr = c.Write(buf[:6])
 		}
 		pool.BytesPool.Put(buf)
-		if errors.Is(rerr, io.EOF) {
-			rerr = nil
+		if errors.Is(rErr, io.EOF) {
+			rErr = nil
 		}
-		if errors.Is(werr, io.EOF) {
-			werr = nil
-		}
-		if rerr != nil || werr != nil {
-			t.Logger.Debug().AnErr("read err", rerr).AnErr("write err", werr).Msg("process err")
+		if rErr != nil || wErr != nil {
+			t.Logger.Debug().AnErr("read err", rErr).AnErr("write err", wErr).Msg("process err")
 		}
 		c.tasksRWMtx.Lock()
 		delete(c.tasks, id)
 		c.tasksRWMtx.Unlock()
 		t.Close()
-		if atomic.AddUint32(&c.TasksCount, ^uint32(0)) == 0 && c.IsClosing() {
+		if wErr != nil {
+			c.Close()
+		} else if atomic.AddUint32(&c.TasksCount, ^uint32(0)) == 0 && c.IsClosing() {
 			c.SendCloseSignal()
 			c.Close()
 		}
@@ -247,13 +246,13 @@ func (t *httpTask) process(id uint32, c *conn) {
 		binary.BigEndian.PutUint16(buf[4:], predef.Data)
 		if c.client.config.LocalTimeout > 0 {
 			dl := time.Now().Add(c.client.config.LocalTimeout)
-			rerr = t.conn.SetReadDeadline(dl)
-			if rerr != nil {
+			rErr = t.conn.SetReadDeadline(dl)
+			if rErr != nil {
 				return
 			}
 		}
 		var l int
-		l, rerr = t.conn.Read(buf[10:])
+		l, rErr = t.conn.Read(buf[10:])
 		if l > 0 {
 			binary.BigEndian.PutUint32(buf[6:], uint32(l))
 			l += 10
@@ -261,12 +260,12 @@ func (t *httpTask) process(id uint32, c *conn) {
 			if predef.Debug {
 				c.Logger.Trace().Hex("data", buf[:l]).Msg("write")
 			}
-			_, werr = c.Write(buf[:l])
-			if werr != nil {
+			_, wErr = c.Write(buf[:l])
+			if wErr != nil {
 				return
 			}
 		}
-		if rerr != nil {
+		if rErr != nil {
 			return
 		}
 	}

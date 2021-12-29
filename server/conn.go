@@ -334,10 +334,16 @@ func (c *conn) readLoop(cli *client) {
 					}()
 				}
 				if err != nil {
-					c.Logger.Debug().Err(err).Msg("remote req resp writer closed")
-					task.Close()
+					if oe, ok := err.(*net.OpError); ok {
+						switch oe.Op {
+						case "write":
+							c.Logger.Debug().Err(err).Msg("remote req resp writer closed")
+							task.Close()
+							continue
+						}
+					}
+					return
 				}
-				continue
 			}
 			bs, err := ioutil.ReadAll(r)
 			c.Logger.Trace().Uint16("op", op).Hex("content", bs).Err(err).Uint32("id", id).Msg("orphan resp")
@@ -354,20 +360,22 @@ func (c *conn) readLoop(cli *client) {
 
 func (c *conn) process(id uint32, task *conn) {
 	atomic.AddUint32(&c.TasksCount, 1)
-	var rerr error
-	var werr error
+	var rErr error
+	var wErr error
 	buf := pool.BytesPool.Get().([]byte)
 	defer func() {
-		if werr == nil {
+		if wErr == nil {
 			binary.BigEndian.PutUint32(buf[0:], id)
 			binary.BigEndian.PutUint16(buf[4:], predef.Close)
-			_, werr = c.Write(buf[:6])
+			_, wErr = c.Write(buf[:6])
 		}
 		pool.BytesPool.Put(buf)
-		if rerr != nil || werr != nil {
-			c.Logger.Debug().AnErr("read err", rerr).AnErr("write err", werr).Msg("process err")
+		if rErr != nil || wErr != nil {
+			c.Logger.Debug().AnErr("read err", rErr).AnErr("write err", wErr).Msg("process err")
 		}
-		if atomic.AddUint32(&c.TasksCount, ^uint32(0)) == 0 && c.IsClosing() {
+		if wErr != nil {
+			c.Close()
+		} else if atomic.AddUint32(&c.TasksCount, ^uint32(0)) == 0 && c.IsClosing() {
 			c.SendCloseSignal()
 			c.Close()
 		}
@@ -377,13 +385,13 @@ func (c *conn) process(id uint32, task *conn) {
 		binary.BigEndian.PutUint16(buf[4:], predef.Data)
 		if c.server.config.Timeout > 0 {
 			dl := time.Now().Add(c.server.config.Timeout)
-			rerr = task.SetReadDeadline(dl)
-			if rerr != nil {
+			rErr = task.SetReadDeadline(dl)
+			if rErr != nil {
 				return
 			}
 		}
 		var l int
-		l, rerr = task.Reader.Read(buf[10:])
+		l, rErr = task.Reader.Read(buf[10:])
 		if l > 0 {
 			binary.BigEndian.PutUint32(buf[6:], uint32(l))
 			l += 10
@@ -391,12 +399,12 @@ func (c *conn) process(id uint32, task *conn) {
 			if predef.Debug {
 				c.Logger.Trace().Hex("data", buf[:l]).Msg("write")
 			}
-			_, werr = c.Write(buf[:l])
-			if werr != nil {
+			_, wErr = c.Write(buf[:l])
+			if wErr != nil {
 				return
 			}
 		}
-		if rerr != nil {
+		if rErr != nil {
 			return
 		}
 	}
