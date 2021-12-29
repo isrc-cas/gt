@@ -1,7 +1,6 @@
 package server
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/isrc-cas/gt/config"
@@ -22,34 +21,36 @@ func TestUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usersYaml := struct{ Users Users }{make(Users)}
-	err = config.Yaml2Interface(&conf.Options.Users, &usersYaml)
+	u := make(map[string]user)
+	err = config.Yaml2Interface(conf.Options.Users, u)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = conf.Users.mergeUsers(usersYaml.Users, conf.ID, conf.Secret)
+	result := users{}
+
+	err = result.mergeUsers(conf.Users, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = result.mergeUsers(u, conf.ID, conf.Secret)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectedResult := Users{
-		"id1": {
-			Secret: "secret1-overwrite-overwrite",
-		},
-		"id2": {
-			Secret: "secret2-overwrite",
-		},
-		"id3": {
-			Secret: "secret3",
-		},
-		"id4": {
-			Secret: "secret4",
-		},
-		"id5": {
-			Secret: "secret5",
-		},
-	}
-	if !reflect.DeepEqual(&expectedResult, &conf.Users) {
-		t.Fatal("unexpected result")
-	}
+	expectedResult := users{}
+	expectedResult.Store("id1", user{Secret: "secret1-overwrite-overwrite"})
+	expectedResult.Store("id2", user{Secret: "secret2-overwrite"})
+	expectedResult.Store("id3", user{Secret: "secret3"})
+	expectedResult.Store("id4", user{Secret: "secret4"})
+	expectedResult.Store("id5", user{Secret: "secret5"})
+	expectedResult.Range(func(key, value interface{}) bool {
+		v, ok := result.Load(key)
+		if !ok {
+			t.Fatalf("%q does not exist", key)
+		}
+		if value.(user).Secret != v.(user).Secret {
+			t.Fatal("secret does not match")
+		}
+		return true
+	})
 }

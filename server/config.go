@@ -3,17 +3,17 @@ package server
 import (
 	"errors"
 	"fmt"
-	"time"
-
 	"github.com/isrc-cas/gt/config"
 	"github.com/isrc-cas/gt/predef"
+	"github.com/isrc-cas/gt/server/sync"
 	"github.com/rs/zerolog"
+	"time"
 )
 
 // Config is a server config.
 type Config struct {
-	Version string // 目前未使用
-	Users   Users  `yaml:"users"`
+	Version string          // 目前未使用
+	Users   map[string]user `yaml:"users"`
 	Options
 }
 
@@ -26,11 +26,12 @@ type Options struct {
 	CertFile      string `yaml:"certFile" usage:"The path to cert file"`
 	KeyFile       string `yaml:"keyFile" usage:"The path to key file"`
 
-	// 只用于显示帮助信息，解析结果在 Config.Users
-	ID      config.StringSlice `arg:"id" yaml:"-" usage:"The user id"`
-	Secret  config.StringSlice `arg:"secret" yaml:"-" usage:"The secret for user id"`
-	Users   string             `yaml:"users" usage:"The users yaml file to load"`
-	AuthAPI string             `yaml:"authAPI" usage:"The API to authenticate with id and secret"`
+	// 只用于显示帮助信息，解析结果在 Config.users
+	ID             config.StringSlice `arg:"id" yaml:"-" usage:"The user id"`
+	Secret         config.StringSlice `arg:"secret" yaml:"-" usage:"The secret for user id"`
+	Users          string             `yaml:"users" usage:"The users yaml file to load"`
+	AuthAPI        string             `yaml:"authAPI" usage:"The API to authenticate user with id and secret"`
+	AllowAnyClient bool               `yaml:"allowAnyClient" usage:"Allow any client to connect to the server"`
 
 	HTTPMUXHeader string `yaml:"httpMUXHeader" usage:"The http multiplexing header to be used"`
 
@@ -55,8 +56,7 @@ type Options struct {
 }
 
 func defaultConfig() Config {
-	config := Config{
-		Users: make(Users),
+	return Config{
 		Options: Options{
 			Addr:            "80",
 			Timeout:         90 * time.Second,
@@ -71,77 +71,74 @@ func defaultConfig() Config {
 			HTTPMUXHeader: "Host",
 		},
 	}
-
-	return config
 }
 
-// UserDetail 用户权限细节
-type UserDetail struct {
+// user 用户权限细节
+type user struct {
 	Secret string
+	temp   bool
 }
 
-// Users 客户端的权限管理
-type Users map[string]UserDetail
+// users 客户端的权限管理
+type users struct {
+	sync.Map
+}
 
 // 合并 users 配置文件和命令行的 users
-func (u Users) mergeUsers(usersYaml Users, id, secret []string) error {
-	for id, ud := range usersYaml {
-		u[id] = ud
+func (u *users) mergeUsers(users map[string]user, id, secret []string) error {
+	for id, ud := range users {
+		u.Store(id, ud)
 	}
 
 	if len(id) != len(secret) {
 		return errors.New("the number of id does not match the number of secret")
 	}
 	for i := 0; i < len(id); i++ {
-		u[id[i]] = UserDetail{
+		u.Store(id[i], user{
 			Secret: secret[i],
+		})
+	}
+
+	return u.verify()
+}
+
+func (u *users) verify() (err error) {
+	u.Range(func(idValue, userValue interface{}) bool {
+		id := idValue.(string)
+		user := userValue.(user)
+		if len(id) < predef.MinIDSize || len(id) > predef.MaxIDSize {
+			err = fmt.Errorf("invalid id length: '%s'", id)
 		}
+
+		if len(user.Secret) < predef.MinSecretSize || len(user.Secret) > predef.MaxSecretSize {
+			err = fmt.Errorf("invalid secret length: '%s'", user.Secret)
+		}
+		return true
+	})
+	return
+}
+
+func (u *users) empty() (empty bool) {
+	empty = true
+	u.Range(func(key, value interface{}) bool {
+		empty = false
+		return false
+	})
+	return
+}
+
+func (u *users) auth(id string, secret string) (ok bool) {
+	value, ok := u.Load(id)
+	if !ok {
+		return
 	}
-
-	return nil
-}
-
-func (u Users) store(id string, ud UserDetail) {
-	u[id] = ud
-}
-
-func (u Users) load(id string) (UserDetail, bool) {
-	if ud, ok := u[id]; ok {
-		return ud, true
-	}
-	return UserDetail{}, false
-}
-
-func (u Users) delete(id string) {
-	delete(u, id)
-}
-
-func (u Users) empty() bool {
-	return len(u) == 0
-}
-
-func (u Users) auth(id string, secret string) (ok bool) {
-	if ud, ok := u[id]; ok {
-		return ud.Secret == secret
+	if ud, ok := value.(user); ok && ud.Secret == secret {
+		return true
 	}
 	return
 }
 
-func (u Users) verify() error {
-	for id, user := range u {
-		if len(id) < predef.MinIDSize || len(id) > predef.MaxIDSize {
-			return fmt.Errorf("id length invalid: '%s'", id)
-		}
-
-		if len(user.Secret) < predef.MinSecretSize || len(user.Secret) > predef.MaxSecretSize {
-			return fmt.Errorf("secret length invalid: '%s'", user.Secret)
-		}
-	}
-
-	return nil
-}
-
-func (u Users) idConflict(id string) bool {
-	_, ok := u[id]
+func (u *users) idConflict(id string) bool {
+	_, ok := u.Load(id)
 	return ok
 }

@@ -27,6 +27,7 @@ import (
 // Server is a network agent server.
 type Server struct {
 	config       Config
+	users        users
 	logger       zerolog.Logger
 	id2Agent     sync.Map
 	closing      uint32
@@ -50,15 +51,6 @@ func New(args []string) (s *Server, err error) {
 	if conf.Options.Version {
 		fmt.Println(predef.Version)
 		os.Exit(0)
-	}
-	usersYaml := struct{ Users Users }{make(Users)}
-	err = config.Yaml2Interface(&conf.Options.Users, &usersYaml)
-	if err != nil {
-		return
-	}
-	err = conf.Users.mergeUsers(usersYaml.Users, conf.ID, conf.Secret)
-	if err != nil {
-		return
 	}
 
 	err = logger.Init(logger.Options{
@@ -182,7 +174,21 @@ func (s *Server) acceptLoop(l net.Listener) {
 
 // Start runs the server.
 func (s *Server) Start() (err error) {
-	s.logger.Info().Interface("config", s.config).Msg(predef.Version)
+	s.logger.Info().Interface("config", &s.config).Msg(predef.Version)
+
+	err = s.users.mergeUsers(s.config.Users, nil, nil)
+	if err != nil {
+		return
+	}
+	users := make(map[string]user)
+	err = config.Yaml2Interface(s.config.Options.Users, users)
+	if err != nil {
+		return
+	}
+	err = s.users.mergeUsers(users, s.config.ID, s.config.Secret)
+	if err != nil {
+		return
+	}
 
 	if len(s.config.HTTPMUXHeader) <= 0 {
 		err = fmt.Errorf("HTTP multiplexing header (-httpMUXHeader option) '%s' is invalid", s.config.HTTPMUXHeader)
@@ -191,20 +197,20 @@ func (s *Server) Start() (err error) {
 
 	if len(s.config.AuthAPI) > 0 {
 		s.authUser = s.authUserWithAPI
-		s.removeClient = s.removeClientWithNothing
-	} else if s.config.Users.empty() {
-		s.authUser = s.authUserWithAutoSecret
-		s.removeClient = s.removeClientWithAutoSecret
-	} else {
-		err = s.config.Users.verify()
-		if err != nil {
-			return
-		}
+		s.removeClient = s.removeClientOnly
+	} else if s.users.empty() {
+		s.logger.Warn().Msg("working on -allowAnyClient mode, because no user is configured")
+		s.authUser = s.authUserOrCreateUser
+		s.removeClient = s.removeClientAndUser
+	} else if !s.config.AllowAnyClient {
 		s.authUser = s.authUserWithConfig
-		s.removeClient = s.removeClientWithNothing
+		s.removeClient = s.removeClientOnly
+	} else {
+		s.authUser = s.authUserOrCreateUser
+		s.removeClient = s.removeClientAndTempUser
 	}
 	if len(s.config.APIAddr) > 0 {
-		apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("src", "apiServer").Logger(), s.config.Users.idConflict)
+		apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("src", "apiServer").Logger(), s.users.idConflict)
 		s.apiServer = apiServer
 	}
 
@@ -426,7 +432,7 @@ func (s *Server) authUserWithConfig(id string, secret string) (err error) {
 		err = ErrInvalidUser
 		return
 	}
-	ok := s.config.Users.auth(id, secret)
+	ok := s.users.auth(id, secret)
 	if !ok {
 		if s.apiServer != nil && !s.apiServer.Auth(id, secret) {
 			err = ErrInvalidUser
@@ -452,28 +458,35 @@ func (s *Server) authUserWithAPI(id string, secret string) (err error) {
 	return
 }
 
-func (s *Server) authUserWithAutoSecret(id, secret string) (err error) {
-	if _, ok := s.config.Users.load(id); ok {
-		if ok = s.config.Users.auth(id, secret); !ok {
-			err = ErrInvalidUser
-		}
-		return
-	}
-
+func (s *Server) authUserOrCreateUser(id, secret string) (err error) {
 	if s.apiServer != nil && s.apiServer.Auth(id, secret) {
 		return
 	}
 
-	s.config.Users.store(id, UserDetail{secret})
-	err = s.config.Users.verify()
+	value, loaded := s.users.LoadOrCreate(id, func() interface{} {
+		return user{
+			Secret: secret,
+			temp:   true,
+		}
+	})
+	if loaded && secret != value.(user).Secret {
+		err = ErrInvalidUser
+	}
 	return
 }
 
-func (s *Server) removeClientWithNothing(id string) {
+func (s *Server) removeClientOnly(id string) {
 	s.id2Agent.Delete(id)
 }
 
-func (s *Server) removeClientWithAutoSecret(id string) {
+func (s *Server) removeClientAndUser(id string) {
 	s.id2Agent.Delete(id)
-	s.config.Users.delete(id)
+	s.users.Delete(id)
+}
+
+func (s *Server) removeClientAndTempUser(id string) {
+	value, loaded := s.id2Agent.LoadAndDelete(id)
+	if loaded && value.(user).temp {
+		s.users.Delete(id)
+	}
 }

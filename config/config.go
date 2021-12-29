@@ -22,25 +22,26 @@ func ParseFlags(args []string, config, options interface{}) error {
 		return err
 	}
 
-	err = Yaml2Interface(configPath, config)
-	if err != nil {
-		return err
+	if configPath != nil {
+		err = Yaml2Interface(*configPath, config)
+		if err != nil {
+			return err
+		}
 	}
 
 	return copyFlagsValue(options, flagSet, n2fi)
 }
 
 // Yaml2Interface 解析 yaml 配置文件
-func Yaml2Interface(path *string, dstInterface interface{}) (err error) {
+func Yaml2Interface(path string, dstInterface interface{}) (err error) {
 	// 当参数不合法时，直接返回 nil
-	if path == nil || len(*path) == 0 ||
-		dstInterface == nil {
+	if len(path) == 0 || dstInterface == nil {
 		return
 	}
 
-	file, err := os.Open(*path)
+	file, err := os.Open(path)
 	if err != nil {
-		err = fmt.Errorf("open yaml file %q failed: %v", *path, err)
+		err = fmt.Errorf("open yaml file %q failed: %v", path, err)
 		return
 	}
 	defer func() {
@@ -55,7 +56,7 @@ func Yaml2Interface(path *string, dstInterface interface{}) (err error) {
 
 	err = yaml.NewDecoder(file).Decode(dstInterface)
 	if err != nil {
-		err = fmt.Errorf("decode yaml file %q failed: %v", *path, err)
+		err = fmt.Errorf("decode yaml file %q failed: %v", path, err)
 		return
 	}
 
