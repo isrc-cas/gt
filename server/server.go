@@ -294,7 +294,10 @@ func (s *Server) authWithAPI(id string, secret string) (ok bool, err error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Request-Id", strconv.FormatInt(time.Now().Unix(), 10))
-	resp, err := http.DefaultClient.Do(req)
+	client := http.Client{
+		Timeout: s.config.Timeout,
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}

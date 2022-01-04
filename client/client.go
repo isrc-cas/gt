@@ -142,7 +142,10 @@ func (d *dialer) initWithRemoteAPI(c *Client) (err error) {
 	query.Add("network_client_id", c.config.ID)
 	req.URL.RawQuery = query.Encode()
 	req.Header.Set("Request-Id", strconv.FormatInt(time.Now().Unix(), 10))
-	resp, err := http.DefaultClient.Do(req)
+	client := http.Client{
+		Timeout: c.config.RemoteTimeout,
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}

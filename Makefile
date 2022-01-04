@@ -6,7 +6,7 @@ EXE=$(shell go env GOEXE)
 VERSION=$(NAME) - $(DATE) - $(BRANCH) $(COMMIT)
 RELEASE_OPTIONS=-trimpath
 OPTIONS=-trimpath -race
-LDFLAGS=-ldflags "-s -w -X 'network/predef.Version=$(VERSION)'"
+LDFLAGS=-ldflags "-s -w -X 'github.com/isrc-cas/gt/predef.Version=$(VERSION)'"
 SOURCES=$(shell ls **/*.go)
 
 .PHONY: fmt test revive clean
