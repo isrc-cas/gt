@@ -1,0 +1,7 @@
+users:
+  id1:
+    secret: secret1
+  id2:
+    secret: secret2
+  id3:
+    secret: secret3
