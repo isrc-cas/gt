@@ -20,13 +20,12 @@ type Config struct {
 // Options is the config Options for a server.
 type Options struct {
 	Config        string `arg:"config" yaml:"-" usage:"The config file path to load"`
-	Addr          string `yaml:"addr" usage:"The address to listen on. Bare port is supported"`
-	TLSAddr       string `yaml:"tlsAddr" usage:"The address for tls to listen on. Bare port is supported"`
+	Addr          string `yaml:"addr" usage:"The address to listen on. Supports values like: '80', ':80' or '0.0.0.0:80'"`
+	TLSAddr       string `yaml:"tlsAddr" usage:"The address for tls to listen on. Supports values like: '443', ':443' or '0.0.0.0:443'"`
 	TLSMinVersion string `yaml:"tlsVersion" usage:"The tls min version, supported values: tls1.1, tls1.2, tls1.3"`
 	CertFile      string `yaml:"certFile" usage:"The path to cert file"`
 	KeyFile       string `yaml:"keyFile" usage:"The path to key file"`
 
-	// 只用于显示帮助信息，解析结果在 Config.users
 	ID             config.StringSlice `arg:"id" yaml:"-" usage:"The user id"`
 	Secret         config.StringSlice `arg:"secret" yaml:"-" usage:"The secret for user id"`
 	Users          string             `yaml:"users" usage:"The users yaml file to load"`
@@ -35,10 +34,14 @@ type Options struct {
 
 	HTTPMUXHeader string `yaml:"httpMUXHeader" usage:"The http multiplexing header to be used"`
 
-	Timeout time.Duration `yaml:"timeout" usage:"timeout of connections"`
+	Timeout time.Duration `yaml:"timeout" usage:"The timeout of connections. Supports values like '30s', '5m'"`
 
 	// internal api service
-	APIAddr string `yaml:"apiAddr" usage:"The address to listen on for internal api service. Bare port is supported"`
+	APIAddr string `yaml:"apiAddr" usage:"The address to listen on for internal api service. Supports values like: '8080', ':8080' or '0.0.0.0:8080'"`
+
+	// TURN service
+	TURNAddr           string        `yaml:"turnAddr" usage:"The address to listen on for TURN service. Supports values like: '3478', ':3478' or '0.0.0.0:3478'"`
+	ChannelBindTimeout time.Duration `yaml:"channelBindTimeout" usage:"The timeout of channel binding. Supports values like '30s', '5m'"`
 
 	SentryDSN         string             `yaml:"sentryDSN" usage:"Sentry DSN to use"`
 	SentryLevel       config.StringSlice `yaml:"sentryLevel" usage:"Sentry levels: trace, debug, info, warn, error, fatal, panic (default [\"error\", \"fatal\", \"panic\"])"`
@@ -69,6 +72,9 @@ func defaultConfig() Config {
 			SentryRelease:    predef.Version,
 
 			HTTPMUXHeader: "Host",
+
+			//TURNAddr:           "3478",
+			ChannelBindTimeout: 5 * time.Minute,
 		},
 	}
 }

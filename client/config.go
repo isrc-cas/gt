@@ -18,15 +18,15 @@ type Options struct {
 	Config             string        `arg:"config" yaml:"-" usage:"The config file path to load"`
 	ID                 string        `yaml:"id" usage:"The unique id used to connect to server. Now it's the prefix of the domain."`
 	Secret             string        `yaml:"secret" usage:"The secret used to verify the id"`
-	ReconnectDelay     time.Duration `yaml:"reconnectDelay" usage:"The delay before reconnect"`
+	ReconnectDelay     time.Duration `yaml:"reconnectDelay" usage:"The delay before reconnect. Supports values like '30s', '5m'"`
 	Remote             string        `yaml:"remote" usage:"The remote server url. Support tcp:// and tls://, default tcp://"`
 	RemoteAPI          string        `yaml:"remoteAPI" usage:"The API to get remote server url"`
 	RemoteCert         string        `yaml:"remoteCert" usage:"The path to remote cert"`
 	RemoteCertInsecure bool          `yaml:"remoteCertInsecure" usage:"Accept self-signed SSL certs from remote"`
 	RemoteConnections  uint          `yaml:"remoteConnections" usage:"The number of connections to server"`
-	RemoteTimeout      time.Duration `yaml:"remoteTimeout" usage:"The timeout for remote connections"`
+	RemoteTimeout      time.Duration `yaml:"remoteTimeout" usage:"The timeout of remote connections. Supports values like '30s', '5m'"`
 	Local              string        `yaml:"local" usage:"The local service url"`
-	LocalTimeout       time.Duration `yaml:"localTimeout" usage:"The timeout for local connections"`
+	LocalTimeout       time.Duration `yaml:"localTimeout" usage:"The timeout of local connections. Supports values like '30s', '5m'"`
 	UseLocalAsHTTPHost bool          `yaml:"useLocalAsHTTPHost" usage:"Use the local address as host"`
 
 	SentryDSN         string             `yaml:"sentryDSN" usage:"Sentry DSN to use"`

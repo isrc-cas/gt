@@ -21,6 +21,8 @@ import (
 	"github.com/isrc-cas/gt/predef"
 	"github.com/isrc-cas/gt/server/api"
 	"github.com/isrc-cas/gt/server/sync"
+	"github.com/pion/logging"
+	"github.com/pion/turn"
 	"github.com/rs/zerolog"
 )
 
@@ -39,6 +41,7 @@ type Server struct {
 	apiServer    *api.Server
 	authUser     func(id string, secret string) error
 	removeClient func(id string)
+	turnServer   *turn.Server
 }
 
 // New parses the command line args and creates a Server.
@@ -210,7 +213,10 @@ func (s *Server) Start() (err error) {
 		s.removeClient = s.removeClientAndTempUser
 	}
 	if len(s.config.APIAddr) > 0 {
-		apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("src", "apiServer").Logger(), s.users.idConflict)
+		if strings.IndexByte(s.config.APIAddr, ':') == -1 {
+			s.config.APIAddr = ":" + s.config.APIAddr
+		}
+		apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("scope", "apiServer").Logger(), s.users.idConflict)
 		s.apiServer = apiServer
 	}
 
@@ -240,16 +246,59 @@ func (s *Server) Start() (err error) {
 		return
 	}
 
-	if len(s.config.APIAddr) > 0 {
-		if strings.IndexByte(s.config.APIAddr, ':') == -1 {
-			s.config.APIAddr = ":" + s.config.APIAddr
+	if len(s.config.TURNAddr) > 0 {
+		err = s.startTURNServer()
+		if err != nil {
+			return
 		}
+	}
+
+	if len(s.config.APIAddr) > 0 {
 		err = s.startAPIServer()
 		if err != nil {
 			return
 		}
 	}
 	return
+}
+
+func (s *Server) startTURNServer() (err error) {
+	if strings.IndexByte(s.config.TURNAddr, ':') == -1 {
+		s.config.TURNAddr = ":" + s.config.TURNAddr
+	}
+	host, port, err := net.SplitHostPort(s.config.TURNAddr)
+	if err != nil {
+		return
+	}
+	udpPort, err := strconv.Atoi(port)
+	if err != nil {
+		return
+	}
+	factory := logging.NewDefaultLoggerFactory()
+	factory.Writer = s.logger.With().Str("scope", "turnServer").Logger()
+	server := turn.NewServer(&turn.ServerConfig{
+		Realm:              "gt",
+		ChannelBindTimeout: s.config.ChannelBindTimeout,
+		ListeningPort:      udpPort,
+		LoggerFactory:      factory,
+		Software:           predef.Version,
+		AuthHandler: func(username string, srcAddr net.Addr) (password string, ok bool) {
+			value, ok := s.users.Load(username)
+			if ok {
+				password = value.(string)
+			}
+			return
+		},
+	})
+	if len(host) > 0 {
+		err = server.AddListeningIPAddr(host)
+		if err != nil {
+			return
+		}
+	}
+
+	s.turnServer = server
+	return server.Start()
 }
 
 func (s *Server) startAPIServer() error {
@@ -319,15 +368,18 @@ func (s *Server) Close() {
 	if !atomic.CompareAndSwapUint32(&s.closing, 0, 1) {
 		return
 	}
-	var e1, e2, e error
+	event := s.logger.Info()
 	if s.apiServer != nil {
-		e = s.apiServer.Close()
+		event.AnErr("api", s.apiServer.Close())
+	}
+	if s.turnServer != nil {
+		event.AnErr("turn", s.turnServer.Close())
 	}
 	if s.listener != nil {
-		e1 = s.listener.Close()
+		event.AnErr("listener", s.listener.Close())
 	}
 	if s.tlsListener != nil {
-		e2 = s.tlsListener.Close()
+		event.AnErr("tlsListener", s.tlsListener.Close())
 	}
 	s.id2Agent.Range(func(key, value interface{}) bool {
 		if c, ok := value.(*client); ok && c != nil {
@@ -335,7 +387,7 @@ func (s *Server) Close() {
 		}
 		return true
 	})
-	s.logger.Info().AnErr("listener", e1).AnErr("tlsListener", e2).AnErr("api", e).Msg("server stopped")
+	event.Msg("server stopped")
 }
 
 // IsClosing tells is the server stopping.
@@ -348,15 +400,18 @@ func (s *Server) Shutdown() {
 	if !atomic.CompareAndSwapUint32(&s.closing, 0, 1) {
 		return
 	}
-	var e1, e2, e error
+	event := s.logger.Info()
 	if s.apiServer != nil {
-		e = s.apiServer.Close()
+		event.AnErr("api", s.apiServer.Close())
+	}
+	if s.turnServer != nil {
+		event.AnErr("turn", s.turnServer.Close())
 	}
 	if s.listener != nil {
-		e1 = s.listener.Close()
+		event.AnErr("listener", s.listener.Close())
 	}
 	if s.tlsListener != nil {
-		e2 = s.tlsListener.Close()
+		event.AnErr("tlsListener", s.tlsListener.Close())
 	}
 	for {
 		accepted := s.GetAccepted()
@@ -391,8 +446,7 @@ func (s *Server) Shutdown() {
 		}
 		return true
 	})
-	s.logger.Info().AnErr("listener", e1).AnErr("tlsListener", e2).AnErr("api", e).Msg("server stopped")
-	return
+	event.Msg("server stopped")
 }
 
 func (s *Server) getOrCreateClient(id string, fn func() interface{}) (result *client, exists bool) {
