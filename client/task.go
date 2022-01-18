@@ -264,6 +264,13 @@ func (t *httpTask) process(id uint32, c *conn) {
 			if wErr != nil {
 				return
 			}
+			if c.client.config.RemoteTimeout > 0 {
+				dl := time.Now().Add(c.client.config.RemoteTimeout)
+				wErr = c.Conn.SetReadDeadline(dl)
+				if wErr != nil {
+					return
+				}
+			}
 		}
 		if rErr != nil {
 			return

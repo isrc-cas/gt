@@ -279,5 +279,12 @@ func (c *conn) processData(id uint32, r *bufio.LimitedReader) (readErr, writeErr
 			readErr = err
 		}
 	}
+	if c.client.config.LocalTimeout > 0 {
+		dl := time.Now().Add(c.client.config.LocalTimeout)
+		writeErr = t.conn.SetReadDeadline(dl)
+		if writeErr != nil {
+			return
+		}
+	}
 	return
 }

@@ -283,6 +283,11 @@ func (c *conn) readLoop(cli *client) {
 			return
 		}
 		task, ok := cli.getTask(id)
+		if !ok {
+			bs, err := ioutil.ReadAll(r)
+			c.Logger.Trace().Uint16("op", op).Hex("content", bs).Err(err).Uint32("id", id).Msg("orphan resp")
+			continue
+		}
 		switch op {
 		case predef.Data:
 			if predef.Debug {
@@ -302,51 +307,55 @@ func (c *conn) readLoop(cli *client) {
 			}
 			r.Reader = c.Reader
 			r.N = int64(l)
-			if ok {
-				if !predef.Debug {
-					_, err = r.WriteTo(task)
-				} else {
-					err = func() error {
-						buf := pool.BytesPool.Get().([]byte)
-						defer pool.BytesPool.Put(buf)
-						for {
-							n, re := r.Read(buf)
-							if n > 0 {
-								task.Logger.Trace().Hex("data", buf[:n]).Msg("resp")
-								wn, we := task.Write(buf[:n])
-								if we != nil {
-									return we
-								}
-								if wn != n {
-									return connection.ErrInvalidWrite
-								}
+			if !predef.Debug {
+				_, err = r.WriteTo(task)
+			} else {
+				err = func() error {
+					buf := pool.BytesPool.Get().([]byte)
+					defer pool.BytesPool.Put(buf)
+					for {
+						n, re := r.Read(buf)
+						if n > 0 {
+							task.Logger.Trace().Hex("data", buf[:n]).Msg("resp")
+							wn, we := task.Write(buf[:n])
+							if we != nil {
+								return we
 							}
-							if re != nil {
-								if re == io.EOF {
-									return nil
-								}
-								return re
+							if wn != n {
+								return connection.ErrInvalidWrite
 							}
-							if r.N <= 0 {
+						}
+						if re != nil {
+							if re == io.EOF {
 								return nil
 							}
+							return re
 						}
-					}()
-				}
-				if err != nil {
-					if oe, ok := err.(*net.OpError); ok {
-						switch oe.Op {
-						case "write":
-							c.Logger.Debug().Err(err).Msg("remote req resp writer closed")
-							task.Close()
-							continue
+						if r.N <= 0 {
+							return nil
 						}
 					}
-					return
+				}()
+			}
+			if err != nil {
+				if oe, ok := err.(*net.OpError); ok {
+					switch oe.Op {
+					case "write":
+						c.Logger.Debug().Err(err).Uint32("id", id).Msg("remote req resp writer closed")
+						task.Close()
+						continue
+					}
+				}
+				return
+			}
+			if c.server.config.Timeout > 0 {
+				dl := time.Now().Add(c.server.config.Timeout)
+				err = task.SetReadDeadline(dl)
+				if err != nil {
+					c.Logger.Debug().Err(err).Uint32("id", id).Msg("update read deadline failed")
+					task.Close()
 				}
 			}
-			bs, err := ioutil.ReadAll(r)
-			c.Logger.Trace().Uint16("op", op).Hex("content", bs).Err(err).Uint32("id", id).Msg("orphan resp")
 		case predef.Close:
 			if predef.Debug {
 				c.Logger.Trace().Uint32("id", id).Msg("read close op")
@@ -402,6 +411,13 @@ func (c *conn) process(id uint32, task *conn) {
 			_, wErr = c.Write(buf[:l])
 			if wErr != nil {
 				return
+			}
+			if c.server.config.Timeout > 0 {
+				dl := time.Now().Add(c.server.config.Timeout)
+				wErr = c.SetReadDeadline(dl)
+				if wErr != nil {
+					return
+				}
 			}
 		}
 		if rErr != nil {
