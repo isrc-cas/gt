@@ -43,6 +43,8 @@ type Options struct {
 	TURNAddr           string        `yaml:"turnAddr" usage:"The address to listen on for TURN service. Supports values like: '3478', ':3478' or '0.0.0.0:3478'"`
 	ChannelBindTimeout time.Duration `yaml:"channelBindTimeout" usage:"The timeout of channel binding. Supports values like '30s', '5m'"`
 
+	SNIAddr string `yaml:"sniAddr" usage:"The address to listen on for raw tls proxy. Host comes from Server Name Indication. Bare port is supported"`
+
 	SentryDSN         string             `yaml:"sentryDSN" usage:"Sentry DSN to use"`
 	SentryLevel       config.StringSlice `yaml:"sentryLevel" usage:"Sentry levels: trace, debug, info, warn, error, fatal, panic (default [\"error\", \"fatal\", \"panic\"])"`
 	SentrySampleRate  float64            `yaml:"sentrySampleRate" usage:"Sentry sample rate for event submission: [0.0 - 1.0]"`

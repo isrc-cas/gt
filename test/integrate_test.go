@@ -3,6 +3,7 @@ package test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -72,7 +73,7 @@ func setupServerAndClient(t *testing.T, local string, sArgs, cArgs []string) (*s
 	return s, c, serverAddr
 }
 
-func setupHTTPClient(addr string) *http.Client {
+func setupHTTPClient(addr string, tlsConfig *tls.Config) *http.Client {
 	dialFn := func(ctx context.Context, network string, address string) (net.Conn, error) {
 		return (&net.Dialer{
 			Timeout:   30 * time.Second,
@@ -81,6 +82,7 @@ func setupHTTPClient(addr string) *http.Client {
 	}
 	httpClient := &http.Client{
 		Transport: &http.Transport{
+			TLSClientConfig:       tlsConfig,
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           dialFn,
 			ForceAttemptHTTP2:     true,
@@ -99,7 +101,7 @@ func TestServerAndClient(t *testing.T) {
 		c.Close()
 		s.Close()
 	}()
-	httpClient := setupHTTPClient(serverAddr)
+	httpClient := setupHTTPClient(serverAddr, nil)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +158,7 @@ func TestClientAndServerWithLocalServer(t *testing.T) {
 		c.Close()
 		s.Close()
 	}()
-	httpClient := setupHTTPClient(serverAddr)
+	httpClient := setupHTTPClient(serverAddr, nil)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com/test?hello=world")
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +330,7 @@ func TestAPIStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	httpClient := setupHTTPClient(apiAddr)
+	httpClient := setupHTTPClient(apiAddr, nil)
 	resp, err := httpClient.Get("http://status.example.com/status") // 只要路径是 /status 就行，域名不需要与上面的设置相同
 	if err != nil {
 		t.Fatal(err)
@@ -415,7 +417,7 @@ func TestAuthAPI(t *testing.T) {
 	}()
 
 	// 通过 http 测试
-	httpClient := setupHTTPClient(serverAddr)
+	httpClient := setupHTTPClient(serverAddr, nil)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +487,7 @@ func TestRemoteAPI(t *testing.T) {
 	}()
 
 	// 通过 http 测试
-	httpClient := setupHTTPClient(serverAddr)
+	httpClient := setupHTTPClient(serverAddr, nil)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -521,8 +523,50 @@ func TestAutoSecret(t *testing.T) {
 	}()
 
 	// 通过 http 测试
-	httpClient := setupHTTPClient(serverAddr)
+	httpClient := setupHTTPClient(serverAddr, nil)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal("invalid status code")
+	}
+	all, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s", all)
+}
+
+func TestSNI(t *testing.T) {
+	// 启动服务端、客户端
+	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
+	serverSNIAddr := net.JoinHostPort("localhost", util.RandomPort())
+	s, c, _ := setupServerAndClient(t, "", []string{
+		"server",
+		"-addr", serverAddr,
+		"-sniAddr", serverSNIAddr,
+		"-id", "www",
+		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
+		"-timeout", "10s",
+	}, []string{
+		"client",
+		"-id", "www",
+		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
+		"-local", "https://www.baidu.com",
+		"-remote", serverAddr,
+		"-remoteTimeout", "5s",
+		"-useLocalAsHTTPHost",
+	})
+	defer func() {
+		c.Close()
+		s.Close()
+	}()
+
+	// 通过 https 测试
+	httpClient := setupHTTPClient(serverSNIAddr, &tls.Config{})
+	resp, err := httpClient.Get("https://www.baidu.com")
 	if err != nil {
 		t.Fatal(err)
 	}
