@@ -35,6 +35,7 @@ type Server struct {
 	closing      uint32
 	tlsListener  net.Listener
 	listener     net.Listener
+	sniListener  net.Listener
 	accepted     uint64
 	served       uint64
 	tunneling    uint64
@@ -129,6 +130,18 @@ func (s *Server) listen() (err error) {
 	return
 }
 
+func (s *Server) sniListen() (err error) {
+	s.logger.Info().Str("sniAddr", s.config.SNIAddr).Msg("Listening")
+	l, err := net.Listen("tcp", s.config.SNIAddr)
+	if err != nil {
+		err = fmt.Errorf("can not listen on addr '%s', cause %s, please check option 'sniAddr'", s.config.SNIAddr, err.Error())
+		return
+	}
+	s.sniListener = l
+	go s.acceptLoop(l)
+	return
+}
+
 func (s *Server) acceptLoop(l net.Listener) {
 	var err error
 	defer func() {
@@ -171,7 +184,11 @@ func (s *Server) acceptLoop(l net.Listener) {
 		}
 		atomic.AddUint64(&s.accepted, 1)
 		c := newConn(conn, s)
-		go c.handle()
+		if l == s.sniListener {
+			go c.sniHandle()
+		} else {
+			go c.handle()
+		}
 	}
 }
 
@@ -236,6 +253,16 @@ func (s *Server) Start() (err error) {
 			s.config.Addr = ":" + s.config.Addr
 		}
 		err = s.listen()
+		if err != nil {
+			return
+		}
+		listening = true
+	}
+	if len(s.config.SNIAddr) > 0 {
+		if strings.IndexByte(s.config.SNIAddr, ':') == -1 {
+			s.config.SNIAddr = ":" + s.config.SNIAddr
+		}
+		err = s.sniListen()
 		if err != nil {
 			return
 		}
@@ -381,6 +408,9 @@ func (s *Server) Close() {
 	if s.tlsListener != nil {
 		event.AnErr("tlsListener", s.tlsListener.Close())
 	}
+	if s.sniListener != nil {
+		event.AnErr("sniListener", s.sniListener.Close())
+	}
 	s.id2Agent.Range(func(key, value interface{}) bool {
 		if c, ok := value.(*client); ok && c != nil {
 			c.close()
@@ -412,6 +442,9 @@ func (s *Server) Shutdown() {
 	}
 	if s.tlsListener != nil {
 		event.AnErr("tlsListener", s.tlsListener.Close())
+	}
+	if s.sniListener != nil {
+		event.AnErr("sniListener", s.sniListener.Close())
 	}
 	for {
 		accepted := s.GetAccepted()

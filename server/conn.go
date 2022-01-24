@@ -3,10 +3,6 @@ package server
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/isrc-cas/gt/bufio"
-	connection "github.com/isrc-cas/gt/conn"
-	"github.com/isrc-cas/gt/pool"
-	"github.com/isrc-cas/gt/predef"
 	"io"
 	"io/ioutil"
 	"net"
@@ -15,6 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/isrc-cas/gt/bufio"
+	connection "github.com/isrc-cas/gt/conn"
+	"github.com/isrc-cas/gt/pool"
+	"github.com/isrc-cas/gt/predef"
 )
 
 var (
@@ -90,6 +91,63 @@ func (c *conn) handle() {
 	}
 	c.handleHTTP()
 	return
+}
+
+func (c *conn) sniHandle() {
+	startTime := time.Now()
+	reader := pool.GetReader(c.Conn)
+	c.Reader = reader
+	defer func() {
+		c.Close()
+		pool.PutReader(reader)
+		endTime := time.Now()
+		if !predef.Debug {
+			if e := recover(); e != nil {
+				c.Logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
+			}
+		}
+		c.Logger.Info().Dur("cost", endTime.Sub(startTime)).Msg("closed")
+	}()
+	if c.server.config.Timeout > 0 {
+		dl := startTime.Add(c.server.config.Timeout)
+		err := c.SetReadDeadline(dl)
+		if err != nil {
+			c.Logger.Debug().Err(err).Msg("handle set deadline failed")
+			return
+		}
+	}
+
+	var err error
+	var host []byte
+	defer func() {
+		if err != nil {
+			c.Logger.Error().Bytes("host", host).Err(err).Msg("sniHandle")
+		}
+		atomic.AddUint64(&c.server.served, 1)
+	}()
+
+	host, err = peekTLSHost(c.Reader)
+	if err != nil {
+		c.Logger.Warn().Err(err).Msg("failed to peek tls host")
+	}
+	if len(host) < 1 {
+		err = ErrInvalidHTTPProtocol
+		return
+	}
+	id, err := parseIDFromHost(host)
+	if err != nil {
+		return
+	}
+	if len(id) < predef.MinIDSize {
+		err = ErrInvalidID
+		return
+	}
+	client, ok := c.server.getClient(string(id))
+	if ok {
+		client.process(c)
+	} else {
+		err = ErrIDNotFound
+	}
 }
 
 func (c *conn) handleHTTP() {

@@ -3,13 +3,14 @@ package test
 import (
 	"errors"
 	"fmt"
-	"github.com/isrc-cas/gt/client"
-	"github.com/isrc-cas/gt/util"
 	"io"
 	"net"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/isrc-cas/gt/client"
+	"github.com/isrc-cas/gt/util"
 )
 
 func TestFailToDialLocalServer(t *testing.T) {
@@ -40,7 +41,7 @@ func TestFailToDialLocalServer(t *testing.T) {
 	client.OnTunnelClose.Store(func() {
 		panic("tunnel should not be closed")
 	})
-	httpClient := setupHTTPClient(serverAddr)
+	httpClient := setupHTTPClient(serverAddr, nil)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com/test?hello=world")
 	if err == nil {
 		t.Fatal("should failed to connect")
@@ -141,7 +142,7 @@ func TestInCompleteHTTPReqToServer(t *testing.T) {
 	//}
 	time.Sleep(12 * time.Second)
 
-	httpClient := setupHTTPClient(serverAddr)
+	httpClient := setupHTTPClient(serverAddr, nil)
 	resp, err := httpClient.Get("http://05797ac9-86ae-40b0-b767-7a41e03a5486.example.com/test?hello=world")
 	if err != nil {
 		t.Fatal(err)
