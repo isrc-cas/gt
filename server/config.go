@@ -34,16 +34,20 @@ type Options struct {
 
 	HTTPMUXHeader string `yaml:"httpMUXHeader" usage:"The http multiplexing header to be used"`
 
-	Timeout time.Duration `yaml:"timeout" usage:"The timeout of connections. Supports values like '30s', '5m'"`
+	Timeout                        time.Duration `yaml:"timeout" usage:"The timeout of connections. Supports values like '30s', '5m'"`
+	TimeoutOnUnidirectionalTraffic bool          `yaml:"timeoutOnUnidirectionalTraffic" usage:"Timeout will happens when traffic is unidirectional"`
 
 	// internal api service
-	APIAddr string `yaml:"apiAddr" usage:"The address to listen on for internal api service. Supports values like: '8080', ':8080' or '0.0.0.0:8080'"`
+	APIAddr          string `yaml:"apiAddr" usage:"The address to listen on for internal api service. Supports values like: '8080', ':8080' or '0.0.0.0:8080'"`
+	APICertFile      string `yaml:"apiCertFile" usage:"The path to cert file"`
+	APIKeyFile       string `yaml:"apiKeyFile" usage:"The path to key file"`
+	APITLSMinVersion string `yaml:"apiTLSVersion" usage:"The tls min version, supported values: tls1.1, tls1.2, tls1.3"`
 
 	// TURN service
 	TURNAddr           string        `yaml:"turnAddr" usage:"The address to listen on for TURN service. Supports values like: '3478', ':3478' or '0.0.0.0:3478'"`
 	ChannelBindTimeout time.Duration `yaml:"channelBindTimeout" usage:"The timeout of channel binding. Supports values like '30s', '5m'"`
 
-	SNIAddr string `yaml:"sniAddr" usage:"The address to listen on for raw tls proxy. Host comes from Server Name Indication. Bare port is supported"`
+	SNIAddr string `yaml:"sniAddr" usage:"The address to listen on for raw tls proxy. Host comes from Server Name Indication. Supports values like: '443', ':443' or '0.0.0.0:443'"`
 
 	SentryDSN         string             `yaml:"sentryDSN" usage:"Sentry DSN to use"`
 	SentryLevel       config.StringSlice `yaml:"sentryLevel" usage:"Sentry levels: trace, debug, info, warn, error, fatal, panic (default [\"error\", \"fatal\", \"panic\"])"`
@@ -63,12 +67,13 @@ type Options struct {
 func defaultConfig() Config {
 	return Config{
 		Options: Options{
-			Addr:            "80",
-			Timeout:         90 * time.Second,
-			TLSMinVersion:   "tls1.2",
-			LogFileMaxCount: 7,
-			LogFileMaxSize:  512 * 1024 * 1024,
-			LogLevel:        zerolog.InfoLevel.String(),
+			Addr:             "80",
+			Timeout:          90 * time.Second,
+			TLSMinVersion:    "tls1.2",
+			APITLSMinVersion: "tls1.2",
+			LogFileMaxCount:  7,
+			LogFileMaxSize:   512 * 1024 * 1024,
+			LogLevel:         zerolog.InfoLevel.String(),
 
 			SentrySampleRate: 1.0,
 			SentryRelease:    predef.Version,
