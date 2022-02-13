@@ -23,7 +23,7 @@ func peekTLSHost(reader *bufio.Reader) ([]byte, error) {
 	recordLayerType := buf[bufIndex]
 	bufIndex++
 	if recordLayerType != 22 {
-		return nil, errors.New("Record Layer is not Handshake")
+		return nil, errors.New("the Record Layer type is not Handshake")
 	}
 	bufIndex += 2 + 2 // Record Layer Version, recordLayerLen
 
@@ -34,7 +34,7 @@ func peekTLSHost(reader *bufio.Reader) ([]byte, error) {
 	handshakeType := buf[bufIndex]
 	bufIndex++
 	if handshakeType != 1 {
-		return nil, errors.New("Handshake Type is not Client Hello")
+		return nil, errors.New("the Handshake Type is not Client Hello")
 	}
 	bufIndex += 3 + 2 + 32 // Handshake Length, Handshake Version, Handshake Random
 	if bufIndex+1 > bufLen {
@@ -88,7 +88,7 @@ func peekTLSHost(reader *bufio.Reader) ([]byte, error) {
 		extensionsLen--
 		// 判断 Server Name Type 是否是 host_name
 		if serverNameType != 0 {
-			return nil, errors.New("Server Name Type is not host_name")
+			return nil, errors.New("the Server Name Type is not host_name")
 		}
 		if bufIndex+2 > bufLen {
 			return nil, errors.New("failed to read Server Name Length")

@@ -50,6 +50,7 @@ func (c *conn) handle() {
 	startTime := time.Now()
 	reader := pool.GetReader(c.Conn)
 	c.Reader = reader
+	handled := false
 	defer func() {
 		c.Close()
 		pool.PutReader(reader)
@@ -60,6 +61,9 @@ func (c *conn) handle() {
 			}
 		}
 		c.Logger.Info().Dur("cost", endTime.Sub(startTime)).Msg("closed")
+		if !handled {
+			atomic.AddUint64(&c.server.failed, 1)
+		}
 	}()
 	if c.server.config.Timeout > 0 {
 		dl := startTime.Add(c.server.config.Timeout)
@@ -85,15 +89,15 @@ func (c *conn) handle() {
 				c.Logger.Warn().Err(err).Msg("failed to discard version field")
 				return
 			}
-			c.handleTunnel()
+			handled = c.handleTunnel()
 			return
 		}
 	}
-	c.handleHTTP()
+	handled = c.handleHTTP()
 	return
 }
 
-func (c *conn) sniHandle() {
+func (c *conn) handleSNI() {
 	startTime := time.Now()
 	reader := pool.GetReader(c.Conn)
 	c.Reader = reader
@@ -121,7 +125,7 @@ func (c *conn) sniHandle() {
 	var host []byte
 	defer func() {
 		if err != nil {
-			c.Logger.Error().Bytes("host", host).Err(err).Msg("sniHandle")
+			c.Logger.Error().Bytes("host", host).Err(err).Msg("handleSNI")
 		}
 		atomic.AddUint64(&c.server.served, 1)
 	}()
@@ -129,6 +133,7 @@ func (c *conn) sniHandle() {
 	host, err = peekTLSHost(c.Reader)
 	if err != nil {
 		c.Logger.Warn().Err(err).Msg("failed to peek tls host")
+		return
 	}
 	if len(host) < 1 {
 		err = ErrInvalidHTTPProtocol
@@ -150,7 +155,7 @@ func (c *conn) sniHandle() {
 	}
 }
 
-func (c *conn) handleHTTP() {
+func (c *conn) handleHTTP() (handled bool) {
 	var err error
 	var host []byte
 	defer func() {
@@ -158,6 +163,7 @@ func (c *conn) handleHTTP() {
 			c.Logger.Error().Bytes("host", host).Err(err).Msg("handleHTTP")
 		}
 		atomic.AddUint64(&c.server.served, 1)
+		handled = true
 	}()
 	var id []byte
 	if c.server.config.HTTPMUXHeader == "Host" {
@@ -189,9 +195,10 @@ func (c *conn) handleHTTP() {
 	} else {
 		err = ErrIDNotFound
 	}
+	return
 }
 
-func (c *conn) handleTunnel() {
+func (c *conn) handleTunnel() (handled bool) {
 	reader := c.Reader
 
 	// 读取 id 相关
@@ -273,7 +280,9 @@ func (c *conn) handleTunnel() {
 	}
 	defer cli.removeTunnel(c)
 	atomic.AddUint64(&c.server.tunneling, 1)
+	handled = true
 	c.readLoop(cli)
+	return
 }
 
 func (c *conn) GetTasksCount() uint32 {
@@ -406,7 +415,7 @@ func (c *conn) readLoop(cli *client) {
 				}
 				return
 			}
-			if c.server.config.Timeout > 0 {
+			if c.server.config.Timeout > 0 && !c.server.config.TimeoutOnUnidirectionalTraffic {
 				dl := time.Now().Add(c.server.config.Timeout)
 				err = task.SetReadDeadline(dl)
 				if err != nil {
@@ -470,7 +479,7 @@ func (c *conn) process(id uint32, task *conn) {
 			if wErr != nil {
 				return
 			}
-			if c.server.config.Timeout > 0 {
+			if c.server.config.Timeout > 0 && !c.server.config.TimeoutOnUnidirectionalTraffic {
 				dl := time.Now().Add(c.server.config.Timeout)
 				wErr = c.SetReadDeadline(dl)
 				if wErr != nil {

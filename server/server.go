@@ -38,6 +38,7 @@ type Server struct {
 	sniListener  net.Listener
 	accepted     uint64
 	served       uint64
+	failed       uint64
 	tunneling    uint64
 	apiServer    *api.Server
 	authUser     func(id string, secret string) error
@@ -83,30 +84,10 @@ func New(args []string) (s *Server, err error) {
 
 func (s *Server) tlsListen() (err error) {
 	s.logger.Info().Str("addr", s.config.TLSAddr).Msg("Listening TLS")
-	crt, err := tls.LoadX509KeyPair(s.config.CertFile, s.config.KeyFile)
+	var tlsConfig *tls.Config
+	tlsConfig, err = newTLSConfig(s.config.CertFile, s.config.KeyFile, s.config.TLSMinVersion)
 	if err != nil {
-		err = fmt.Errorf("invalid cert and key, cause %s", err.Error())
 		return
-	}
-	tlsConfig := &tls.Config{}
-	tlsConfig.Certificates = []tls.Certificate{crt}
-	switch strings.ToLower(s.config.TLSMinVersion) {
-	case "tls1.1":
-		tlsConfig.MinVersion = tls.VersionTLS11
-	default:
-		fallthrough
-	case "tls1.2":
-		tlsConfig.MinVersion = tls.VersionTLS12
-		tlsConfig.CipherSuites = []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-		}
-	case "tls1.3":
-		tlsConfig.MinVersion = tls.VersionTLS13
 	}
 	l, err := tls.Listen("tcp", s.config.TLSAddr, tlsConfig)
 	if err != nil {
@@ -114,7 +95,9 @@ func (s *Server) tlsListen() (err error) {
 		return
 	}
 	s.tlsListener = l
-	go s.acceptLoop(l)
+	go s.acceptLoop(l, func(c *conn) {
+		c.handle()
+	})
 	return
 }
 
@@ -126,7 +109,9 @@ func (s *Server) listen() (err error) {
 		return
 	}
 	s.listener = l
-	go s.acceptLoop(l)
+	go s.acceptLoop(l, func(c *conn) {
+		c.handle()
+	})
 	return
 }
 
@@ -138,11 +123,13 @@ func (s *Server) sniListen() (err error) {
 		return
 	}
 	s.sniListener = l
-	go s.acceptLoop(l)
+	go s.acceptLoop(l, func(c *conn) {
+		c.handleSNI()
+	})
 	return
 }
 
-func (s *Server) acceptLoop(l net.Listener) {
+func (s *Server) acceptLoop(l net.Listener, handle func(*conn)) {
 	var err error
 	defer func() {
 		if !predef.Debug {
@@ -153,9 +140,9 @@ func (s *Server) acceptLoop(l net.Listener) {
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
 		}
-		s.logger.Info().Err(err).Msg("acceptLoop ended")
+		s.logger.Info().Str("addr", l.Addr().String()).Err(err).Msg("acceptLoop ended")
 	}()
-	s.logger.Info().Msg("acceptLoop started")
+	s.logger.Info().Str("addr", l.Addr().String()).Msg("acceptLoop started")
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
 		if atomic.LoadUint32(&s.closing) > 0 {
@@ -184,11 +171,7 @@ func (s *Server) acceptLoop(l net.Listener) {
 		}
 		atomic.AddUint64(&s.accepted, 1)
 		c := newConn(conn, s)
-		if l == s.sniListener {
-			go c.sniHandle()
-		} else {
-			go c.handle()
-		}
+		go handle(c)
 	}
 }
 
@@ -266,7 +249,6 @@ func (s *Server) Start() (err error) {
 		if err != nil {
 			return
 		}
-		listening = true
 	}
 	if !listening {
 		err = errors.New("no services is providing, please check the config")
@@ -328,27 +310,62 @@ func (s *Server) startTURNServer() (err error) {
 	return server.Start()
 }
 
-func (s *Server) startAPIServer() error {
-	ln, err := net.Listen("tcp", s.config.APIAddr)
+func newTLSConfig(cert, key, tlsMinVersion string) (tlsConfig *tls.Config, err error) {
+	crt, err := tls.LoadX509KeyPair(cert, key)
 	if err != nil {
-		return fmt.Errorf("can not listen on addr '%s', cause %s, please check option 'apiAddr'", s.config.APIAddr, err.Error())
+		err = fmt.Errorf("invalid cert and key, cause %s", err.Error())
+		return
 	}
+	tlsConfig = &tls.Config{}
+	tlsConfig.Certificates = []tls.Certificate{crt}
+	switch strings.ToLower(tlsMinVersion) {
+	case "tls1.1":
+		tlsConfig.MinVersion = tls.VersionTLS11
+	default:
+		fallthrough
+	case "tls1.2":
+		tlsConfig.MinVersion = tls.VersionTLS12
+		tlsConfig.CipherSuites = []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+		}
+	case "tls1.3":
+		tlsConfig.MinVersion = tls.VersionTLS13
+	}
+	return
+}
+
+func (s *Server) startAPIServer() (err error) {
 	if s.tlsListener != nil {
 		s.apiServer.RemoteSchema = "tls://"
 		s.apiServer.RemoteAddr = s.tlsListener.Addr().String()
-		go func() {
-			err := s.apiServer.ServeTLS(ln, s.config.CertFile, s.config.KeyFile)
-			if errors.Is(err, http.ErrServerClosed) {
-				err = nil
-			}
-			s.logger.Info().Err(err).Msg("api server closed")
-		}()
-		return nil
+	} else if s.listener != nil {
+		s.apiServer.RemoteSchema = "tcp://"
+		s.apiServer.RemoteAddr = s.listener.Addr().String()
 	}
-	s.apiServer.RemoteSchema = "tcp://"
-	s.apiServer.RemoteAddr = s.listener.Addr().String()
+	var l net.Listener
+	if len(s.config.APICertFile) > 0 && len(s.config.APIKeyFile) > 0 {
+		var tlsConfig *tls.Config
+		tlsConfig, err = newTLSConfig(s.config.APICertFile, s.config.APIKeyFile, s.config.APITLSMinVersion)
+		if err != nil {
+			return
+		}
+		l, err = tls.Listen("tcp", s.config.APIAddr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("can not listen on addr '%s', cause %s, please check option 'tlsAddr'", s.config.APIAddr, err.Error())
+		}
+	} else {
+		l, err = net.Listen("tcp", s.config.APIAddr)
+		if err != nil {
+			return fmt.Errorf("can not listen on addr '%s', cause %s, please check option 'apiAddr'", s.config.APIAddr, err.Error())
+		}
+	}
 	go func() {
-		err := s.apiServer.Serve(ln)
+		err := s.apiServer.Serve(l)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
@@ -449,8 +466,9 @@ func (s *Server) Shutdown() {
 	for {
 		accepted := s.GetAccepted()
 		served := s.GetServed()
+		failed := s.GetFailed()
 		tunneling := s.GetTunneling()
-		if accepted == served+tunneling {
+		if accepted == served+failed+tunneling {
 			break
 		}
 
@@ -467,9 +485,10 @@ func (s *Server) Shutdown() {
 		}
 
 		s.logger.Info().
-			Uint64("accepted", s.GetAccepted()).
-			Uint64("served", s.GetServed()).
-			Uint64("tunneling", s.GetTunneling()).
+			Uint64("accepted", accepted).
+			Uint64("served", served).
+			Uint64("failed", failed).
+			Uint64("tunneling", tunneling).
 			Msg("server shutting down")
 		time.Sleep(3 * time.Second)
 	}
@@ -507,6 +526,11 @@ func (s *Server) GetAccepted() uint64 {
 // GetServed returns value of served
 func (s *Server) GetServed() uint64 {
 	return atomic.LoadUint64(&s.served)
+}
+
+// GetFailed returns value of served
+func (s *Server) GetFailed() uint64 {
+	return atomic.LoadUint64(&s.failed)
 }
 
 // GetTunneling returns value of tunneling
