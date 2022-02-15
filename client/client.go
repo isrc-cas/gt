@@ -23,19 +23,7 @@ import (
 	"github.com/isrc-cas/gt/logger"
 	"github.com/isrc-cas/gt/predef"
 	"github.com/isrc-cas/gt/util"
-	"github.com/rs/zerolog"
 )
-
-// Client is a network agent client.
-type Client struct {
-	config       Config
-	logger       zerolog.Logger
-	initConnMtx  sync.Mutex
-	closing      uint32
-	tunnels      map[*conn]struct{}
-	tunnelsRWMtx sync.RWMutex
-	tunnelsCond  *sync.Cond
-}
 
 // New parses the command line args and creates a Client.
 func New(args []string) (c *Client, err error) {
@@ -49,7 +37,7 @@ func New(args []string) (c *Client, err error) {
 		os.Exit(0)
 	}
 
-	err = logger.Init(logger.Options{
+	l, err := logger.Init(logger.Options{
 		FilePath:          conf.LogFile,
 		RotationCount:     conf.LogFileMaxCount,
 		RotationSize:      conf.LogFileMaxSize,
@@ -68,7 +56,7 @@ func New(args []string) (c *Client, err error) {
 
 	c = &Client{
 		config:  conf,
-		logger:  logger.Logger,
+		Logger:  l,
 		tunnels: make(map[*conn]struct{}),
 	}
 	c.tunnelsCond = sync.NewCond(c.tunnelsRWMtx.RLocker())
@@ -176,7 +164,7 @@ func (d *dialer) tlsDial() (conn net.Conn, err error) {
 
 // Start runs the client agent.
 func (c *Client) Start() (err error) {
-	c.logger.Info().Interface("config", c.config).Msg(predef.Version)
+	c.Logger.Info().Interface("config", c.config).Msg(predef.Version)
 
 	if len(c.config.ID) < predef.MinIDSize || len(c.config.ID) > predef.MaxIDSize {
 		err = fmt.Errorf("agent id (-id option) '%s' is invalid", c.config.ID)
@@ -214,7 +202,7 @@ func (c *Client) Start() (err error) {
 			if err == nil {
 				break
 			}
-			c.logger.Error().Err(err).Msg("failed to query server address")
+			c.Logger.Error().Err(err).Msg("failed to query server address")
 			time.Sleep(c.config.ReconnectDelay)
 		}
 	}
@@ -246,6 +234,7 @@ func (c *Client) Close() {
 	if !atomic.CompareAndSwapUint32(&c.closing, 0, 1) {
 		return
 	}
+	defer c.Logger.Close()
 	c.tunnelsRWMtx.Lock()
 	for t := range c.tunnels {
 		t.SendCloseSignal()
@@ -271,12 +260,12 @@ func (c *Client) initConn(d dialer) (result *conn, err error) {
 }
 
 func (c *Client) connect(d dialer) (closing bool) {
-	c.logger.Info().Msg("trying to connect to remote")
+	c.Logger.Info().Msg("trying to connect to remote")
 
 	defer func() {
 		if !predef.Debug {
 			if e := recover(); e != nil {
-				c.logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
+				c.Logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
 			}
 		}
 	}()
@@ -285,7 +274,7 @@ func (c *Client) connect(d dialer) (closing bool) {
 	if err == nil {
 		conn.readLoop()
 	} else {
-		c.logger.Error().Err(err).Msg("failed to connect to remote")
+		c.Logger.Error().Err(err).Msg("failed to connect to remote")
 	}
 
 	if atomic.LoadUint32(&c.closing) == 1 {
@@ -301,7 +290,7 @@ func (c *Client) connect(d dialer) (closing bool) {
 		if err == nil {
 			break
 		}
-		c.logger.Error().Err(err).Msg("failed to query server address")
+		c.Logger.Error().Err(err).Msg("failed to query server address")
 		time.Sleep(c.config.ReconnectDelay)
 	}
 	return
@@ -313,7 +302,7 @@ func (c *Client) connectLoop(d dialer) {
 			break
 		}
 	}
-	c.logger.Info().Msg("connect loop exited")
+	c.Logger.Info().Msg("connect loop exited")
 }
 
 func (c *Client) addTunnel(conn *conn) {

@@ -9,7 +9,7 @@ import (
 	zlogsentry "github.com/archdx/zerolog-sentry"
 	"github.com/isrc-cas/gt/logger/file-rotatelogs"
 	"github.com/isrc-cas/gt/predef"
-	"github.com/rs/zerolog"
+	zerolog "github.com/rs/zerolog"
 )
 
 // Options represents the options of logger passed to Init
@@ -29,35 +29,38 @@ type Options struct {
 }
 
 type syncer interface {
-	io.Closer
+	io.WriteCloser
 	Sync() error
 }
 
-var (
+// Logger is the main logger object
+type Logger struct {
+	zerolog.Logger
 	out    syncer
 	sentry io.WriteCloser
-)
+}
 
 // Init initializes the global variable Logger.
-func Init(options Options) (err error) {
+func Init(options Options) (logger Logger, err error) {
 	level, err := zerolog.ParseLevel(options.Level)
 	if err != nil {
 		return
 	}
 
 	var logWriter io.Writer
+	var out syncer
+	var sentry io.WriteCloser
 	if len(options.FilePath) > 0 {
-		f, err := rotatelogs.New(
+		out, err = rotatelogs.New(
 			options.FilePath+".%Y%m%d",
 			rotatelogs.WithRotationCount(options.RotationCount),
 			rotatelogs.WithRotationSize(options.RotationSize),
 			rotatelogs.WithLinkName(options.FilePath),
 		)
 		if err != nil {
-			return err
+			return
 		}
-		logWriter = zerolog.ConsoleWriter{Out: f, TimeFormat: time.UnixDate, NoColor: true}
-		out = f
+		logWriter = zerolog.ConsoleWriter{Out: out, TimeFormat: time.UnixDate, NoColor: true}
 	} else {
 		logWriter = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.UnixDate}
 	}
@@ -72,7 +75,8 @@ func Init(options Options) (err error) {
 				}
 				switch level {
 				case zerolog.Disabled, zerolog.NoLevel:
-					return fmt.Errorf("invalid -sentryLevel '%s'", l)
+					err = fmt.Errorf("invalid -sentryLevel '%s'", l)
+					return
 				}
 				levels[i] = level
 			}
@@ -100,29 +104,37 @@ func Init(options Options) (err error) {
 		logWriter = io.MultiWriter(logWriter, sentry)
 	}
 	if predef.Debug {
-		Logger = zerolog.New(logWriter).With().Caller().Timestamp().Logger().Level(level)
+		logger = Logger{
+			Logger: zerolog.New(logWriter).With().Caller().Timestamp().Logger().Level(level),
+			out:    out,
+			sentry: sentry,
+		}
 	} else {
-		Logger = zerolog.New(logWriter).With().Timestamp().Logger().Level(level)
+		logger = Logger{
+			Logger: zerolog.New(logWriter).With().Timestamp().Logger().Level(level),
+			out:    out,
+			sentry: sentry,
+		}
 	}
 	return
 }
 
 // Close commits the current contents and close the underlying writer
-func Close() {
-	if sentry != nil {
-		err := sentry.Close()
+func (l *Logger) Close() {
+	if l.sentry != nil {
+		err := l.sentry.Close()
 		if err != nil {
-			Error().Err(err).Send()
+			l.Error().Err(err).Msg("failed to close sentry")
 		}
 	}
-	if out != nil {
-		err := out.Sync()
+	if l.out != nil {
+		err := l.out.Sync()
 		if err != nil {
-			Error().Err(err).Send()
+			l.Error().Err(err).Msg("failed to sync log file")
 		}
-		err = out.Close()
+		err = l.out.Close()
 		if err != nil {
-			Error().Err(err).Send()
+			l.Error().Err(err).Msg("failed to close log file")
 		}
 	}
 }

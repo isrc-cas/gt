@@ -23,14 +23,13 @@ import (
 	"github.com/isrc-cas/gt/server/sync"
 	"github.com/pion/logging"
 	"github.com/pion/turn"
-	"github.com/rs/zerolog"
 )
 
 // Server is a network agent server.
 type Server struct {
 	config       Config
 	users        users
-	logger       zerolog.Logger
+	Logger       logger.Logger
 	id2Agent     sync.Map
 	closing      uint32
 	tlsListener  net.Listener
@@ -58,7 +57,7 @@ func New(args []string) (s *Server, err error) {
 		os.Exit(0)
 	}
 
-	err = logger.Init(logger.Options{
+	l, err := logger.Init(logger.Options{
 		FilePath:          conf.LogFile,
 		RotationCount:     conf.LogFileMaxCount,
 		RotationSize:      conf.LogFileMaxSize,
@@ -77,13 +76,13 @@ func New(args []string) (s *Server, err error) {
 
 	s = &Server{
 		config: conf,
-		logger: logger.Logger,
+		Logger: l,
 	}
 	return
 }
 
 func (s *Server) tlsListen() (err error) {
-	s.logger.Info().Str("addr", s.config.TLSAddr).Msg("Listening TLS")
+	s.Logger.Info().Str("addr", s.config.TLSAddr).Msg("Listening TLS")
 	var tlsConfig *tls.Config
 	tlsConfig, err = newTLSConfig(s.config.CertFile, s.config.KeyFile, s.config.TLSMinVersion)
 	if err != nil {
@@ -102,7 +101,7 @@ func (s *Server) tlsListen() (err error) {
 }
 
 func (s *Server) listen() (err error) {
-	s.logger.Info().Str("addr", s.config.Addr).Msg("Listening")
+	s.Logger.Info().Str("addr", s.config.Addr).Msg("Listening")
 	l, err := net.Listen("tcp", s.config.Addr)
 	if err != nil {
 		err = fmt.Errorf("can not listen on addr '%s', cause %s, please check option 'addr'", s.config.Addr, err.Error())
@@ -116,7 +115,7 @@ func (s *Server) listen() (err error) {
 }
 
 func (s *Server) sniListen() (err error) {
-	s.logger.Info().Str("sniAddr", s.config.SNIAddr).Msg("Listening")
+	s.Logger.Info().Str("sniAddr", s.config.SNIAddr).Msg("Listening")
 	l, err := net.Listen("tcp", s.config.SNIAddr)
 	if err != nil {
 		err = fmt.Errorf("can not listen on addr '%s', cause %s, please check option 'sniAddr'", s.config.SNIAddr, err.Error())
@@ -134,15 +133,15 @@ func (s *Server) acceptLoop(l net.Listener, handle func(*conn)) {
 	defer func() {
 		if !predef.Debug {
 			if e := recover(); e != nil {
-				s.logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
+				s.Logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
 			}
 		}
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
 		}
-		s.logger.Info().Str("addr", l.Addr().String()).Err(err).Msg("acceptLoop ended")
+		s.Logger.Info().Str("addr", l.Addr().String()).Err(err).Msg("acceptLoop ended")
 	}()
-	s.logger.Info().Str("addr", l.Addr().String()).Msg("acceptLoop started")
+	s.Logger.Info().Str("addr", l.Addr().String()).Msg("acceptLoop started")
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
 		if atomic.LoadUint32(&s.closing) > 0 {
@@ -163,7 +162,7 @@ func (s *Server) acceptLoop(l net.Listener, handle func(*conn)) {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				s.logger.Error().Err(err).Dur("delay", tempDelay).Msg("Server accept error")
+				s.Logger.Error().Err(err).Dur("delay", tempDelay).Msg("Server accept error")
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -177,7 +176,7 @@ func (s *Server) acceptLoop(l net.Listener, handle func(*conn)) {
 
 // Start runs the server.
 func (s *Server) Start() (err error) {
-	s.logger.Info().Interface("config", &s.config).Msg(predef.Version)
+	s.Logger.Info().Interface("config", &s.config).Msg(predef.Version)
 
 	err = s.users.mergeUsers(s.config.Users, nil, nil)
 	if err != nil {
@@ -202,7 +201,7 @@ func (s *Server) Start() (err error) {
 		s.authUser = s.authUserWithAPI
 		s.removeClient = s.removeClientOnly
 	} else if s.users.empty() {
-		s.logger.Warn().Msg("working on -allowAnyClient mode, because no user is configured")
+		s.Logger.Warn().Msg("working on -allowAnyClient mode, because no user is configured")
 		s.authUser = s.authUserOrCreateUser
 		s.removeClient = s.removeClientAndUser
 	} else if !s.config.AllowAnyClient {
@@ -216,7 +215,7 @@ func (s *Server) Start() (err error) {
 		if strings.IndexByte(s.config.APIAddr, ':') == -1 {
 			s.config.APIAddr = ":" + s.config.APIAddr
 		}
-		apiServer := api.NewServer(s.config.APIAddr, s.logger.With().Str("scope", "apiServer").Logger(), s.users.idConflict)
+		apiServer := api.NewServer(s.config.APIAddr, s.Logger.With().Str("scope", "apiServer").Logger(), s.users.idConflict)
 		s.apiServer = apiServer
 	}
 
@@ -284,7 +283,7 @@ func (s *Server) startTURNServer() (err error) {
 		return
 	}
 	factory := logging.NewDefaultLoggerFactory()
-	factory.Writer = s.logger.With().Str("scope", "turnServer").Logger()
+	factory.Writer = s.Logger.With().Str("scope", "turnServer").Logger()
 	server := turn.NewServer(&turn.ServerConfig{
 		Realm:              "gt",
 		ChannelBindTimeout: s.config.ChannelBindTimeout,
@@ -369,7 +368,7 @@ func (s *Server) startAPIServer() (err error) {
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
-		s.logger.Info().Err(err).Msg("api server closed")
+		s.Logger.Info().Err(err).Msg("api server closed")
 	}()
 	return nil
 }
@@ -412,7 +411,8 @@ func (s *Server) Close() {
 	if !atomic.CompareAndSwapUint32(&s.closing, 0, 1) {
 		return
 	}
-	event := s.logger.Info()
+	defer s.Logger.Close()
+	event := s.Logger.Info()
 	if s.apiServer != nil {
 		event.AnErr("api", s.apiServer.Close())
 	}
@@ -447,7 +447,8 @@ func (s *Server) Shutdown() {
 	if !atomic.CompareAndSwapUint32(&s.closing, 0, 1) {
 		return
 	}
-	event := s.logger.Info()
+	defer s.Logger.Close()
+	event := s.Logger.Info()
 	if s.apiServer != nil {
 		event.AnErr("api", s.apiServer.Close())
 	}
@@ -484,7 +485,7 @@ func (s *Server) Shutdown() {
 			break
 		}
 
-		s.logger.Info().
+		s.Logger.Info().
 			Uint64("accepted", accepted).
 			Uint64("served", served).
 			Uint64("failed", failed).

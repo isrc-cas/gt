@@ -35,7 +35,7 @@ func newConn(c net.Conn, client *Client) *conn {
 		client: client,
 		tasks:  make(map[uint32]*httpTask, 100),
 	}
-	nc.Logger = client.logger.With().
+	nc.Logger = client.Logger.With().
 		Str("clientConn", strconv.FormatUint(uint64(uintptr(unsafe.Pointer(nc))), 16)).
 		Logger()
 	return nc
@@ -96,9 +96,6 @@ func (c *conn) Close() {
 	pool.PutReader(c.Reader)
 }
 
-// OnTunnelClose used for test only.
-var OnTunnelClose atomic.Value
-
 func (c *conn) readLoop() {
 	var err error
 	var pings int
@@ -109,14 +106,7 @@ func (c *conn) readLoop() {
 		}
 		c.Close()
 		c.Logger.Info().Err(err).Int("pings", pings).Msg("tunnel closed")
-		if predef.Debug {
-			cb := OnTunnelClose.Load()
-			if cb != nil {
-				if cb, ok := cb.(func()); ok {
-					cb()
-				}
-			}
-		}
+		c.onTunnelClose()
 	}()
 
 	r := &bufio.LimitedReader{}

@@ -38,7 +38,7 @@ func newConn(c net.Conn, s *Server) *conn {
 		},
 		server: s,
 	}
-	nc.Logger = s.logger.With().
+	nc.Logger = s.Logger.With().
 		Str("serverConn", strconv.FormatUint(uint64(uintptr(unsafe.Pointer(nc))), 16)).
 		Str("ip", c.RemoteAddr().String()).
 		Logger()

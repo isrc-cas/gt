@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/isrc-cas/gt/client"
 	"github.com/isrc-cas/gt/util"
 )
 
 func TestFailToDialLocalServer(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/test", func(writer http.ResponseWriter, request *http.Request) {
 		err := request.ParseForm()
@@ -38,7 +38,7 @@ func TestFailToDialLocalServer(t *testing.T) {
 		c.Close()
 		s.Close()
 	}()
-	client.OnTunnelClose.Store(func() {
+	c.OnTunnelClose.Store(func() {
 		panic("tunnel should not be closed")
 	})
 	httpClient := setupHTTPClient(serverAddr, nil)
@@ -78,12 +78,13 @@ func TestFailToDialLocalServer(t *testing.T) {
 	if string(all) != "ok" {
 		t.Fatal("invalid resp")
 	}
-	client.OnTunnelClose.Store(func() {})
+	c.OnTunnelClose.Store(func() {})
 	t.Logf("%s", all)
 	s.Shutdown()
 }
 
 func TestInCompleteHTTPReqToServer(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/test", func(writer http.ResponseWriter, request *http.Request) {
 		err := request.ParseForm()
@@ -124,7 +125,7 @@ func TestInCompleteHTTPReqToServer(t *testing.T) {
 		c.Close()
 		s.Close()
 	}()
-	client.OnTunnelClose.Store(func() {
+	c.OnTunnelClose.Store(func() {
 		panic("tunnel should not be closed")
 	})
 
@@ -158,7 +159,7 @@ func TestInCompleteHTTPReqToServer(t *testing.T) {
 	if string(all) != "ok" {
 		t.Fatal("invalid resp")
 	}
-	client.OnTunnelClose.Store(func() {})
+	c.OnTunnelClose.Store(func() {})
 	t.Logf("%s", all)
 	s.Shutdown()
 }

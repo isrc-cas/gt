@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/isrc-cas/gt/client"
-	"github.com/isrc-cas/gt/logger"
+	"github.com/rs/zerolog/log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,20 +11,19 @@ import (
 func main() {
 	c, err := client.New(os.Args)
 	if err != nil {
-		logger.Fatal().Err(err).Send()
-	}
-	defer logger.Close()
-	err = c.Start()
-	if err != nil {
-		logger.Fatal().Err(err).Msg("failed to start")
+		log.Fatal().Err(err).Msg("failed to create client")
 	}
 	defer c.Close()
+	err = c.Start()
+	if err != nil {
+		c.Logger.Fatal().Err(err).Msg("failed to start")
+	}
 
 	osSig := make(chan os.Signal, 1)
 	signal.Notify(osSig, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
 
 	select {
 	case sig := <-osSig:
-		logger.Info().Str("signal", sig.String()).Msg("received os signal")
+		c.Logger.Info().Str("signal", sig.String()).Msg("received os signal")
 	}
 }

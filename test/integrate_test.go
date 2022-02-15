@@ -96,6 +96,7 @@ func setupHTTPClient(addr string, tlsConfig *tls.Config) *http.Client {
 }
 
 func TestServerAndClient(t *testing.T) {
+	t.Parallel()
 	s, c, serverAddr := setupServerAndClient(t, "", nil, nil)
 	defer func() {
 		c.Close()
@@ -118,6 +119,7 @@ func TestServerAndClient(t *testing.T) {
 }
 
 func TestClientAndServerWithLocalServer(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/test", func(writer http.ResponseWriter, request *http.Request) {
 		err := request.ParseForm()
@@ -179,6 +181,7 @@ func TestClientAndServerWithLocalServer(t *testing.T) {
 }
 
 func TestClientAndServerWithLocalWebsocket(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{} // use default options
 
 	echo := func(w http.ResponseWriter, r *http.Request) {
@@ -300,6 +303,7 @@ FOR:
 }
 
 func TestPing(t *testing.T) {
+	t.Parallel()
 	s, c, _ := setupServerAndClient(t, "", nil, nil)
 	defer func() {
 		c.Close()
@@ -313,6 +317,7 @@ func TestPing(t *testing.T) {
 }
 
 func TestAPIStatus(t *testing.T) {
+	t.Parallel()
 	port := util.RandomPort()
 	apiAddr := net.JoinHostPort("localhost", port)
 	port = util.RandomPort()
@@ -367,6 +372,7 @@ func TestAPIStatus(t *testing.T) {
 }
 
 func TestAuthAPI(t *testing.T) {
+	t.Parallel()
 	// 模拟 AuthAPI
 	authAddr := net.JoinHostPort("localhost", util.RandomPort())
 	go func() {
@@ -434,6 +440,7 @@ func TestAuthAPI(t *testing.T) {
 }
 
 func TestRemoteAPI(t *testing.T) {
+	t.Parallel()
 	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
 
 	// 模拟 RemoteAPI
@@ -504,6 +511,7 @@ func TestRemoteAPI(t *testing.T) {
 }
 
 func TestAutoSecret(t *testing.T) {
+	t.Parallel()
 	// 启动服务端、客户端
 	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
 	s, c, _ := setupServerAndClient(t, "", []string{
@@ -540,6 +548,7 @@ func TestAutoSecret(t *testing.T) {
 }
 
 func TestSNI(t *testing.T) {
+	t.Parallel()
 	// 启动服务端、客户端
 	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
 	serverSNIAddr := net.JoinHostPort("localhost", util.RandomPort())
@@ -579,4 +588,84 @@ func TestSNI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("%s", all)
+}
+
+func TestClientAndServerWithHTTPMUXHeader(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/test", func(writer http.ResponseWriter, request *http.Request) {
+		err := request.ParseForm()
+		if err != nil {
+			panic(err)
+		}
+		if request.FormValue("hello") != "world" {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, err = writer.Write([]byte("ok"))
+		if err != nil {
+			panic(err)
+		}
+	})
+	hs := &http.Server{Handler: mux}
+
+	port := util.RandomPort()
+	hsu := net.JoinHostPort("localhost", port)
+	l, err := net.Listen("tcp", hsu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := hs.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+	go func() {
+		err := hs.Serve(l)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			panic(err)
+		}
+	}()
+	serverAddr := net.JoinHostPort("localhost", util.RandomPort())
+	s, c, _ := setupServerAndClient(t, "", []string{
+		"server",
+		"-addr", serverAddr,
+		"-httpMUXHeader", "EID",
+	}, []string{
+		"client",
+		"-id", "05797ac9-86ae-40b0-b767-7a41e03a5486",
+		"-secret", "eec1eabf-2c59-4e19-bf10-34707c17ed89",
+		"-local", fmt.Sprintf("http://%s", hsu),
+		"-remote", serverAddr,
+		"-remoteTimeout", "5s",
+		"-useLocalAsHTTPHost",
+	})
+	defer func() {
+		c.Close()
+		s.Close()
+	}()
+	httpClient := setupHTTPClient(serverAddr, nil)
+	req, err := http.NewRequest("GET", "http://abc.example.com/test?hello=world", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header["EID"] = []string{"05797ac9-86ae-40b0-b767-7a41e03a5486"}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal("invalid status code")
+	}
+	all, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(all) != "ok" {
+		t.Fatal("invalid resp")
+	}
+	t.Logf("%s", all)
+	s.Shutdown()
 }
