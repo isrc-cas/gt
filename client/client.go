@@ -205,11 +205,17 @@ func (c *Client) Start() (err error) {
 			err = fmt.Errorf("remote api url (-remoteAPI option) '%s' must begin with http:// or https://", c.config.RemoteAPI)
 			return
 		}
-		if len(dialer.host) == 0 {
-			err = dialer.initWithRemoteAPI(c)
-			if err != nil {
+		for len(dialer.host) == 0 {
+			if atomic.LoadUint32(&c.closing) == 1 {
+				err = errors.New("client is closing")
 				return
 			}
+			err = dialer.initWithRemoteAPI(c)
+			if err == nil {
+				break
+			}
+			c.logger.Error().Err(err).Msg("failed to query server address")
+			time.Sleep(c.config.ReconnectDelay)
 		}
 	}
 	if len(dialer.host) == 0 {
@@ -287,11 +293,16 @@ func (c *Client) connect(d dialer) (closing bool) {
 	}
 	time.Sleep(c.config.ReconnectDelay)
 
-	if len(c.config.RemoteAPI) > 0 {
-		err = d.initWithRemoteAPI(c)
-		if err != nil {
-			c.logger.Error().Err(err).Msg("failed to query server address")
+	for len(c.config.RemoteAPI) > 0 {
+		if atomic.LoadUint32(&c.closing) == 1 {
+			return true
 		}
+		err = d.initWithRemoteAPI(c)
+		if err == nil {
+			break
+		}
+		c.logger.Error().Err(err).Msg("failed to query server address")
+		time.Sleep(c.config.ReconnectDelay)
 	}
 	return
 }
