@@ -22,7 +22,7 @@ import (
 	"github.com/isrc-cas/gt/server/api"
 	"github.com/isrc-cas/gt/server/sync"
 	"github.com/pion/logging"
-	"github.com/pion/turn"
+	"github.com/pion/turn/v2"
 )
 
 // Server is a network agent server.
@@ -274,39 +274,53 @@ func (s *Server) startTURNServer() (err error) {
 	if strings.IndexByte(s.config.TURNAddr, ':') == -1 {
 		s.config.TURNAddr = ":" + s.config.TURNAddr
 	}
-	host, port, err := net.SplitHostPort(s.config.TURNAddr)
-	if err != nil {
-		return
-	}
-	udpPort, err := strconv.Atoi(port)
+	udpListener, err := net.ListenPacket("udp", s.config.TURNAddr)
 	if err != nil {
 		return
 	}
 	factory := logging.NewDefaultLoggerFactory()
 	factory.Writer = s.Logger.With().Str("scope", "turnServer").Logger()
-	server := turn.NewServer(&turn.ServerConfig{
-		Realm:              "gt",
+	var lv logging.LogLevel
+	switch strings.ToUpper(s.config.LogLevel) {
+	default:
+		fallthrough
+	case "DISABLE":
+		lv = logging.LogLevelDisabled
+	case "ERROR":
+		lv = logging.LogLevelError
+	case "WARN":
+		lv = logging.LogLevelWarn
+	case "INFO":
+		lv = logging.LogLevelInfo
+	case "DEBUG":
+		lv = logging.LogLevelDebug
+	case "TRACE":
+		lv = logging.LogLevelTrace
+	}
+	factory.DefaultLogLevel = lv
+	server, err := turn.NewServer(turn.ServerConfig{
+		Realm:              "ao.space",
 		ChannelBindTimeout: s.config.ChannelBindTimeout,
-		ListeningPort:      udpPort,
 		LoggerFactory:      factory,
-		Software:           predef.Version,
-		AuthHandler: func(username string, srcAddr net.Addr) (password string, ok bool) {
+		AuthHandler: func(username, realm string, srcAddr net.Addr) (key []byte, ok bool) {
 			value, ok := s.users.Load(username)
 			if ok {
-				password = value.(string)
+				key = []byte(value.(string))
 			}
 			return
 		},
+		PacketConnConfigs: []turn.PacketConnConfig{
+			{
+				PacketConn: udpListener,
+				RelayAddressGenerator: &turn.RelayAddressGeneratorNone{
+					Address: "0.0.0.0",
+				},
+			},
+		},
 	})
-	if len(host) > 0 {
-		err = server.AddListeningIPAddr(host)
-		if err != nil {
-			return
-		}
-	}
 
 	s.turnServer = server
-	return server.Start()
+	return
 }
 
 func newTLSConfig(cert, key, tlsMinVersion string) (tlsConfig *tls.Config, err error) {

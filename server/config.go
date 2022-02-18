@@ -80,8 +80,8 @@ func defaultConfig() Config {
 
 			HTTPMUXHeader: "Host",
 
-			//TURNAddr:           "3478",
-			ChannelBindTimeout: 5 * time.Minute,
+			TURNAddr:           "3478",
+			ChannelBindTimeout: 2 * time.Minute,
 		},
 	}
 }
