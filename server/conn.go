@@ -46,7 +46,7 @@ func newConn(c net.Conn, s *Server) *conn {
 	return nc
 }
 
-func (c *conn) handle() {
+func (c *conn) handle(handleFunc func() bool) {
 	startTime := time.Now()
 	reader := pool.GetReader(c.Conn)
 	c.Reader = reader
@@ -93,34 +93,11 @@ func (c *conn) handle() {
 			return
 		}
 	}
-	handled = c.handleHTTP()
+	handled = handleFunc()
 	return
 }
 
-func (c *conn) handleSNI() {
-	startTime := time.Now()
-	reader := pool.GetReader(c.Conn)
-	c.Reader = reader
-	defer func() {
-		c.Close()
-		pool.PutReader(reader)
-		endTime := time.Now()
-		if !predef.Debug {
-			if e := recover(); e != nil {
-				c.Logger.Error().Msgf("recovered panic: %#v\n%s", e, debug.Stack())
-			}
-		}
-		c.Logger.Info().Dur("cost", endTime.Sub(startTime)).Msg("closed")
-	}()
-	if c.server.config.Timeout > 0 {
-		dl := startTime.Add(c.server.config.Timeout)
-		err := c.SetReadDeadline(dl)
-		if err != nil {
-			c.Logger.Debug().Err(err).Msg("handle set deadline failed")
-			return
-		}
-	}
-
+func (c *conn) handleSNI() (handled bool) {
 	var err error
 	var host []byte
 	defer func() {
@@ -128,11 +105,11 @@ func (c *conn) handleSNI() {
 			c.Logger.Error().Bytes("host", host).Err(err).Msg("handleSNI")
 		}
 		atomic.AddUint64(&c.server.served, 1)
+		handled = true
 	}()
 
 	host, err = peekTLSHost(c.Reader)
 	if err != nil {
-		c.Logger.Warn().Err(err).Msg("failed to peek tls host")
 		return
 	}
 	if len(host) < 1 {
@@ -153,6 +130,8 @@ func (c *conn) handleSNI() {
 	} else {
 		err = ErrIDNotFound
 	}
+
+	return
 }
 
 func (c *conn) handleHTTP() (handled bool) {

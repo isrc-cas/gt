@@ -82,7 +82,7 @@ Focus on high-performance, low-latency, memory-saving intranet penetration solut
 - Server (public)
 
 ```shell
-./release/server -addr 8080 -sniAddr 443 -id id1 -secret secret1
+./release/server -addr "" -sniAddr 443 -id id1 -secret secret1
 ```
 
 ![img](./image/sni示例-服务端.png)
@@ -90,7 +90,7 @@ Focus on high-performance, low-latency, memory-saving intranet penetration solut
 - Client (internal)
 
 ```shell
-./release/client -local https://127.0.0.1 -remote tcp://id1.example.com:8080 -id id1 -secret secret1
+./release/client -local https://127.0.0.1 -remote tcp://id1.example.com:443 -id id1 -secret secret1
 ```
 
 ![img](./image/sni示例-客户端.png)

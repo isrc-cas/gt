@@ -84,7 +84,7 @@
 - 服务端（公网服务器）
 
 ```shell
-./release/server -addr 8080 -sniAddr 443 -id id1 -secret secret1
+./release/server -addr "" -sniAddr 443 -id id1 -secret secret1
 ```
 
 ![img](./doc/image/sni示例-服务端.png)
@@ -92,7 +92,7 @@
 - 客户端（内网服务器）
 
 ```shell
-./release/client -local https://127.0.0.1 -remote tcp://id1.example.com:8080 -id id1 -secret secret1
+./release/client -local https://127.0.0.1 -remote tcp://id1.example.com:443 -id id1 -secret secret1
 ```
 
 ![img](./doc/image/sni示例-客户端.png)
