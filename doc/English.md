@@ -12,16 +12,18 @@ Focus on high-performance, low-latency, memory-saving intranet penetration solut
 - [Working Principle](#working-principle)
 - [Examples](#examples)
   - [HTTP](#http)
-  - [HTTPS](#https)
-  - [TLS Encrypts HTTP Between Client And Server](#tls-encrypts-http-between-client-and-server)
+  - [HTTPS Decrypted Into HTTP](#https-decrypted-into-http)
+  - [HTTPS Directly](#https-directly)
+  - [Client HTTP Convert To HTTPS](#client-http-convert-to-https)
 - [Parameters](#parameters)
   - [Client Parameters](#client-parameters)
   - [Server Parameters](#server-parameters)
   - [Configuration](#configuration)
-  - [Server Specifies Users](#server-specifies-users)
+  - [Server Configurates Users](#server-configurates-users)
     - [Via Command Line](#via-command-line)
     - [Through The Users Configuration File](#through-the-users-configuration-file)
     - [Through The Config Configuration File](#through-the-config-configuration-file)
+    - [Allow Any Client](#allow-any-client)
 - [Benchmark](#benchmark)
   - [gt](#gt-benchmark)
   - [frp](#frp-dev-branch-42745a3)
@@ -54,58 +56,74 @@ Focus on high-performance, low-latency, memory-saving intranet penetration solut
 
 ![img](./image/客户端http示例.png)
 
-### HTTPS
+### HTTPS Decrypted Into HTTP
+
+- Requirements: There is an intranet server and a public network server, and id1.example.com resolves to the address of the public network server. Want to access the HTTP web page served on port 80 on the intranet server by visiting https://id1.example.com.
+- Server (public)
+
+```shell
+./release/server -addr "" -tlsAddr 443 -certFile /root/openssl_crt/tls.crt -keyFile /root/openssl_crt/tls.key -id id1 -secret secret1
+```
+
+![img](./image/https解密示例-服务端.png)
+
+- Client (internal), because it uses a self-signed certificate, uses the -remoteCertInsecure option, otherwise it is
+  forbidden to use this option (man-in-the-middle attacks cause encrypted content to be decrypted)
+
+```shell
+./release/client -local http://127.0.0.1 -remote tls://id1.example.com -remoteCertInsecure -id id1 -secret secret1
+```
+
+![img](./image/https解密示例-客户端.png)
+
+### HTTPS Directly
+
+- Requirements: There is an intranet server and a public network server, and id1.example.com resolves to the address of the public network server. Want to access the HTTPS webpage served on port 443 on the intranet server by visiting https://id1.example.com.
+- Server (public)
+
+```shell
+./release/server -addr 8080 -sniAddr 443 -id id1 -secret secret1
+```
+
+![img](./image/sni示例-服务端.png)
+
+- Client (internal)
+
+```shell
+./release/client -local https://127.0.0.1 -remote tcp://id1.example.com:8080 -id id1 -secret secret1
+```
+
+![img](./image/sni示例-客户端.png)
+
+### Client HTTP Convert To HTTPS
 
 - Requirements: There is an internal gt server and a public gt server, id1.example.com resolves to the address of the
-  public gt server. Hope to visit the webpage served by port 443 on the intranet server by visiting id1.example.com:443.
+  public gt server. I hope to visit the webpage served by port 80 on the intranet server by visiting id1.example.com: 8080. At the same time, TLS is used to encrypt the communication between the client and the server.
 
 - Server (public)
 
 ```shell
-./release/server -addr 0 -tlsAddr 443 -certFile /root/openssl_crt/server.crt -keyFile /root/openssl_crt/server.key -id id1 -secret secret1
+./release/server -addr 8080 -tlsAddr 443 -certFile /root/openssl_crt/tls.crt -keyFile /root/openssl_crt/tls.key -id id1 -secret secret1
 ```
 
-![img](./image/服务端https示例.png)
+![img](./image/https解密示例-服务端.png)
 
-- The client (internal), because it uses a self-signed certificate, uses the -remoteCertInsecure option, otherwise it is
-  forbidden to use this option (man-in-the-middle attacks cause encrypted content to be decrypted)
-
-```shell
-./release/client -local https://127.0.0.1:443 -remote tls://id1.example.com -remoteCertInsecure -id id1 -secret secret1
-```
-
-![img](./image/客户端https示例.png)
-
-### TLS Encrypts HTTP Between Client And Server
-
-- Requirements: There is an internal gt server and a public gt server, id1.example.com resolves to the address of the
-  public gt server. I hope to visit the webpage served by port 80 on the intranet server by visiting id1.example.com:
-  8080. At the same time, TLS is used to encrypt the communication between the client and the server.
-
-- Server (public gt server)
-
-```shell
-./release/server -addr 8080 -tlsAddr 443 -certFile /root/openssl_crt/server.crt -keyFile /root/openssl_crt/server.key -id id1 -secret secret1
-```
-
-![img](./image/服务端https示例.png)
-
-- The client (gt server), because it uses a self-signed certificate, so the use of the -remoteCertInsecureoption,
+- Client (internal), because it uses a self-signed certificate, so the use of the -remoteCertInsecureoption,
   otherwise prohibit the use of this option (middle attack led to the encrypted content is decrypted)
 
 ```shell
 ./release/client -local http://127.0.0.1:80 -remote tls://id1.example.com -remoteCertInsecure -id id1 -secret secret1
 ```
 
-![img](./image/客户端https示例.png)
+![img](./image/https解密示例-客户端.png)
 
 ## Parameters
 
 ### Client Parameters
 
 ```shell
-$ ./client -h
-Usage of ./client:
+# ./release/client -h
+Usage of ./release/client:
   -config string
         The config file path to load
   -id string
@@ -113,7 +131,7 @@ Usage of ./client:
   -local string
         The local service url
   -localTimeout duration
-        The timeout for local connections (default 2m0s)
+        The timeout of local connections. Supports values like '30s', '5m' (default 2m0s)
   -logFile string
         Path to save the log file
   -logFileMaxCount uint
@@ -123,9 +141,11 @@ Usage of ./client:
   -logLevel string
         Log level: trace, debug, info, warn, error, fatal, panic, disable (default "info")
   -reconnectDelay duration
-        The delay before reconnect (default 5s)
+        The delay before reconnect. Supports values like '30s', '5m' (default 5s)
   -remote string
         The remote server url. Support tcp:// and tls://, default tcp://
+  -remoteAPI string
+        The API to get remote server url
   -remoteCert string
         The path to remote cert
   -remoteCertInsecure
@@ -133,7 +153,7 @@ Usage of ./client:
   -remoteConnections uint
         The number of connections to server (default 1)
   -remoteTimeout duration
-        The timeout for remote connections (default 5s)
+        The timeout of remote connections. Supports values like '30s', '5m' (default 5s)
   -secret string
         The secret used to verify the id
   -sentryDSN string
@@ -145,11 +165,13 @@ Usage of ./client:
   -sentryLevel value
         Sentry levels: trace, debug, info, warn, error, fatal, panic (default ["error", "fatal", "panic"])
   -sentryRelease string
-        Sentry release to be sent with events
+        Sentry release to be sent with events (default "client - 2022-01-29 10:43:43 - doc 54ac84a")
   -sentrySampleRate float
         Sentry sample rate for event submission: [0.0 - 1.0] (default 1)
   -sentryServerName string
         Sentry server name to be reported
+  -useLocalAsHTTPHost
+        Use the local address as host
   -version
         Show the version of this program
 ```
@@ -222,7 +244,7 @@ options:
   secret: secret1
 ```
 
-### Server Specifies Users
+### Server Configurates Users
 
 The following three methods can be used at the same time. If conflicts are resolved, the priority will be lowered from
 top to bottom.
@@ -273,6 +295,10 @@ options:
   tlsVersion: tls1.3
   users: testdata/users.yaml
 ```
+
+#### Allow Any Client
+
+Add `-allowAnyClient` to the startup parameters of the server, all clients can connect to the server without configuring the server, but the clients with the same `id` only use the `secret` of the first client connected to the server as the correct `secret`, which cannot be overwritten by subsequent clients to ensure security.
 
 ## Benchmark
 
