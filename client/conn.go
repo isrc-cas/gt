@@ -1,7 +1,9 @@
 package client
 
 import (
+	"context"
 	"errors"
+	"github.com/pion/webrtc/v3"
 	"io"
 	"net"
 	"net/url"
@@ -20,9 +22,12 @@ import (
 
 type conn struct {
 	connection.Connection
-	client     *Client
-	tasks      map[uint32]*httpTask
-	tasksRWMtx sync.RWMutex
+	client         *Client
+	tasks          map[uint32]*httpTask
+	tasksRWMtx     sync.RWMutex
+	peerTasks      map[uint32]*peerTask
+	peerTasksRWMtx sync.RWMutex
+	stuns          []string
 }
 
 func newConn(c net.Conn, client *Client) *conn {
@@ -32,8 +37,9 @@ func newConn(c net.Conn, client *Client) *conn {
 			Reader:       pool.GetReader(c),
 			WriteTimeout: client.config.RemoteTimeout,
 		},
-		client: client,
-		tasks:  make(map[uint32]*httpTask, 100),
+		client:    client,
+		tasks:     make(map[uint32]*httpTask, 100),
+		peerTasks: make(map[uint32]*peerTask),
 	}
 	nc.Logger = client.Logger.With().
 		Str("clientConn", strconv.FormatUint(uint64(uintptr(unsafe.Pointer(nc))), 16)).
@@ -110,6 +116,7 @@ func (c *conn) readLoop() {
 	}()
 
 	r := &bufio.LimitedReader{}
+	r.Reader = c.Reader
 	for pings <= 1 {
 		if c.client.config.RemoteTimeout > 0 {
 			dl := time.Now().Add(c.client.config.RemoteTimeout)
@@ -175,7 +182,6 @@ func (c *conn) readLoop() {
 			if err != nil {
 				return
 			}
-			r.Reader = c.Reader
 			r.N = int64(l)
 			rErr, wErr := c.processData(id, r)
 			if rErr != nil {
@@ -185,13 +191,21 @@ func (c *conn) readLoop() {
 				}
 				return
 			}
+			if r.N > 0 {
+				if !predef.Debug {
+					_, err = r.Discard(int(r.N))
+					if err != nil {
+						return
+					}
+				} else {
+					event := c.Logger.Debug().Int("N", int(r.N))
+					all, e := io.ReadAll(r)
+					event.Hex("remaining", all).Err(e).Msg("discarding")
+				}
+			}
 			if wErr != nil {
 				if !errors.Is(wErr, net.ErrClosed) {
 					c.Logger.Warn().Err(wErr).Msg("failed to write data in processData")
-				}
-				_, err = r.Discard(int(r.N))
-				if err != nil {
-					return
 				}
 				continue
 			}
@@ -235,6 +249,26 @@ func (c *conn) dial() (task *httpTask, err error) {
 }
 
 func (c *conn) processData(id uint32, r *bufio.LimitedReader) (readErr, writeErr error) {
+	peekBytes, readErr := r.Peek(2)
+	if readErr != nil {
+		return
+	}
+	// first 2 bytes of p2p sdp request is "X1"(0x5831)
+	isP2P := (uint16(peekBytes[1]) | uint16(peekBytes[0])<<8) == 0x5831
+	c.peerTasksRWMtx.RLock()
+	p2pTask, ok := c.peerTasks[id]
+	c.peerTasksRWMtx.RUnlock()
+	if isP2P || ok {
+		if len(c.stuns) < 1 {
+			respAndClose(id, c, [][]byte{
+				[]byte("HTTP/1.1 403 Forbidden\r\nConnection: Closed\r\n\r\n"),
+			})
+			return
+		}
+		c.processP2P(id, r, p2pTask, ok)
+		return
+	}
+
 	c.tasksRWMtx.RLock()
 	t, ok := c.tasks[id]
 	c.tasksRWMtx.RUnlock()
@@ -254,6 +288,8 @@ func (c *conn) processData(id uint32, r *bufio.LimitedReader) (readErr, writeErr
 				Logger()
 			t.Logger.Info().Msg("task started")
 			go t.process(id, c)
+		} else {
+			c.tasksRWMtx.Unlock()
 		}
 	}
 	_, err := r.WriteTo(t)
@@ -277,4 +313,26 @@ func (c *conn) processData(id uint32, r *bufio.LimitedReader) (readErr, writeErr
 		}
 	}
 	return
+}
+
+func (c *conn) processP2P(id uint32, r *bufio.LimitedReader, t *peerTask, ok bool) {
+	if !ok {
+		c.peerTasksRWMtx.Lock()
+		t, ok = c.peerTasks[id]
+		if !ok {
+			t = &peerTask{}
+			c.peerTasks[id] = t
+			c.peerTasksRWMtx.Unlock()
+			t.data = pool.BytesPool.Get().([]byte)
+			t.ctx, t.ctxDone = context.WithTimeout(context.Background(), 60*time.Second)
+			t.candidateOutChan = make(chan webrtc.ICECandidateInit)
+			t.Logger = c.Logger.With().
+				Uint32("peerTask", id).
+				Logger()
+			t.Logger.Info().Msg("peer task started")
+		} else {
+			c.peerTasksRWMtx.Unlock()
+		}
+	}
+	t.process(id, c, r)
 }

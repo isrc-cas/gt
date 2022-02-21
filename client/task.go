@@ -209,7 +209,7 @@ func (t *httpTask) Close() {
 	}
 	pool.BytesPool.Put(t.buf[:cap(t.buf)])
 	err := t.conn.Close()
-	t.Logger.Info().Err(err).Msg("task close")
+	t.Logger.Info().Err(err).Msg("task closed")
 }
 
 func (t *httpTask) process(id uint32, c *conn) {

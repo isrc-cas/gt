@@ -1,6 +1,7 @@
 package bufio
 
 import (
+	"bytes"
 	"io"
 )
 
@@ -89,4 +90,67 @@ func NewReaderWithBuf(buf []byte) *Reader {
 // GetBuf returns the underlying buffer.
 func (b *Reader) GetBuf() []byte {
 	return b.buf
+}
+
+// ReadSlice reads until the first occurrence of delim in the input,
+// returning a slice pointing at the bytes in the buffer.
+// The bytes stop being valid at the next read.
+// If ReadSlice encounters an error before finding a delimiter,
+// it returns all the data in the buffer and the error itself (often io.EOF).
+// ReadSlice fails with error ErrBufferFull if the buffer fills without a delim.
+// Because the data returned from ReadSlice will be overwritten
+// by the next I/O operation, most clients should use
+// ReadBytes or ReadString instead.
+// ReadSlice returns err != nil if and only if line does not end in delim.
+func (b *LimitedReader) ReadSlice(delim byte) (line []byte, err error) {
+	s := 0 // search start index
+	for {
+		l := int64(b.w)
+		if int64(b.w-b.r) > b.N {
+			l = b.N + int64(b.r)
+		}
+		// Search buffer.
+		if i := bytes.IndexByte(b.buf[b.r+s:l], delim); i >= 0 {
+			i += s
+			line = b.buf[b.r : b.r+i+1]
+			b.r += i + 1
+			break
+		}
+
+		// Pending error?
+		if b.err != nil {
+			line = b.buf[b.r:l]
+			b.r = int(l)
+			err = b.readErr()
+			break
+		}
+
+		s = int(l) - b.r // do not rescan area we scanned before
+		if int64(s) >= b.N {
+			line = b.buf[b.r:l]
+			b.r = int(l)
+			err = io.EOF
+			break
+		}
+
+		// Buffer full?
+		if b.Buffered() >= len(b.buf) {
+			b.r = b.w
+			line = b.buf
+			err = ErrBufferFull
+			break
+		}
+
+		b.fill() // buffer is not full
+	}
+
+	// Handle last byte, if any.
+	if i := len(line) - 1; i >= 0 {
+		b.lastByte = int(line[i])
+		b.lastRuneSize = -1
+	}
+
+	b.N -= int64(len(line))
+
+	return
 }

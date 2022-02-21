@@ -419,7 +419,7 @@ func TestRotationGenerationalNames(t *testing.T) {
 		}
 
 		for i := 0; i < 10; i++ {
-			time.Sleep(time.Second)
+			time.Sleep(2 * time.Second)
 			rl.Write([]byte("Hello, World!"))
 			if !assert.NoError(t, rl.Rotate(), "rl.Rotate should succeed") {
 				return
@@ -427,7 +427,7 @@ func TestRotationGenerationalNames(t *testing.T) {
 
 			// because every new Write should yield a new logfile,
 			// every rorate should be create a filename ending with a .1
-			if !assert.True(t, strings.HasSuffix(rl.CurrentFileName(), ".1"), "log name should end with .1") {
+			if !assert.True(t, strings.HasSuffix(rl.CurrentFileName(), ".1"), "log name should end with .1 but got %s", rl.CurrentFileName()) {
 				return
 			}
 		}

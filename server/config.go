@@ -44,9 +44,7 @@ type Options struct {
 	APIKeyFile       string `yaml:"apiKeyFile" usage:"The path to key file"`
 	APITLSMinVersion string `yaml:"apiTLSVersion" usage:"The tls min version, supported values: tls1.1, tls1.2, tls1.3"`
 
-	// TURN service
-	TURNAddr           string        `yaml:"turnAddr" usage:"The address to listen on for TURN service. Supports values like: '3478', ':3478' or '0.0.0.0:3478'"`
-	ChannelBindTimeout time.Duration `yaml:"channelBindTimeout" usage:"The timeout of channel binding. Supports values like '30s', '5m'"`
+	STUNAddr string `yaml:"stunAddr" usage:"The address to listen on for STUN service. Supports values like: '3478', ':3478' or '0.0.0.0:3478'"`
 
 	SNIAddr string `yaml:"sniAddr" usage:"The address to listen on for raw tls proxy. Host comes from Server Name Indication. Supports values like: '443', ':443' or '0.0.0.0:443'"`
 
@@ -80,9 +78,6 @@ func defaultConfig() Config {
 			SentryRelease:    predef.Version,
 
 			HTTPMUXHeader: "Host",
-
-			// TURNAddr:           "3478",
-			ChannelBindTimeout: 2 * time.Minute,
 		},
 	}
 }

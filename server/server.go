@@ -215,7 +215,7 @@ func (s *Server) Start() (err error) {
 		if strings.IndexByte(s.config.APIAddr, ':') == -1 {
 			s.config.APIAddr = ":" + s.config.APIAddr
 		}
-		apiServer := api.NewServer(s.config.APIAddr, s.Logger.With().Str("scope", "apiServer").Logger(), s.users.idConflict)
+		apiServer := api.NewServer(s.config.APIAddr, s.Logger.With().Str("scope", "api").Logger(), s.users.idConflict)
 		s.apiServer = apiServer
 	}
 
@@ -255,8 +255,8 @@ func (s *Server) Start() (err error) {
 		return
 	}
 
-	if len(s.config.TURNAddr) > 0 {
-		err = s.startTURNServer()
+	if len(s.config.STUNAddr) > 0 {
+		err = s.startSTUNServer()
 		if err != nil {
 			return
 		}
@@ -271,16 +271,18 @@ func (s *Server) Start() (err error) {
 	return
 }
 
-func (s *Server) startTURNServer() (err error) {
-	if strings.IndexByte(s.config.TURNAddr, ':') == -1 {
-		s.config.TURNAddr = ":" + s.config.TURNAddr
+func (s *Server) startSTUNServer() (err error) {
+	if strings.IndexByte(s.config.STUNAddr, ':') == -1 {
+		s.config.STUNAddr = ":" + s.config.STUNAddr
 	}
-	udpListener, err := net.ListenPacket("udp", s.config.TURNAddr)
+	packetConn, err := net.ListenPacket("udp", s.config.STUNAddr)
 	if err != nil {
 		return
 	}
+	stunLogger := s.Logger.With().Str("scope", "stun").Logger()
+	stunLogger.Info().Str("addr", s.config.STUNAddr).Msg("Listening")
 	factory := logging.NewDefaultLoggerFactory()
-	factory.Writer = s.Logger.With().Str("scope", "turnServer").Logger()
+	factory.Writer = stunLogger
 	var lv logging.LogLevel
 	switch strings.ToUpper(s.config.LogLevel) {
 	default:
@@ -300,9 +302,8 @@ func (s *Server) startTURNServer() (err error) {
 	}
 	factory.DefaultLogLevel = lv
 	server, err := turn.NewServer(turn.ServerConfig{
-		Realm:              "ao.space",
-		ChannelBindTimeout: s.config.ChannelBindTimeout,
-		LoggerFactory:      factory,
+		Realm:         "ao.space",
+		LoggerFactory: factory,
 		AuthHandler: func(username, realm string, srcAddr net.Addr) (key []byte, ok bool) {
 			value, ok := s.users.Load(username)
 			if ok {
@@ -312,7 +313,7 @@ func (s *Server) startTURNServer() (err error) {
 		},
 		PacketConnConfigs: []turn.PacketConnConfig{
 			{
-				PacketConn: udpListener,
+				PacketConn: packetConn,
 				RelayAddressGenerator: &turn.RelayAddressGeneratorNone{
 					Address: "0.0.0.0",
 				},

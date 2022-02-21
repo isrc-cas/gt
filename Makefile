@@ -7,7 +7,7 @@ VERSION=$(NAME) - $(DATE) - $(BRANCH) $(COMMIT)
 RELEASE_OPTIONS=-trimpath
 OPTIONS=-trimpath -race
 LDFLAGS=-ldflags "-s -w -X 'github.com/isrc-cas/gt/predef.Version=$(VERSION)'"
-SOURCES=$(shell ls **/*.go)
+SOURCES=$(shell ls -1 **/*.go)
 
 .PHONY: fmt test revive clean
 
@@ -20,7 +20,13 @@ test:
 	go test -race -cover ./...
 
 revive:
-	revive -config revive.toml -exclude bufio/bufio.go -exclude logger/file-rotatelogs/... -exclude build/... -exclude release/... -formatter unix ./...
+	revive -config revive.toml \
+		-exclude client/internal/... \
+		-exclude bufio/bufio.go \
+		-exclude logger/file-rotatelogs/... \
+		-exclude build/... \
+		-exclude release/... \
+		-formatter unix ./...
 
 build: build_server build_client
 

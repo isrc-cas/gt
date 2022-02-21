@@ -65,17 +65,20 @@ func New(args []string) (c *Client, err error) {
 
 type dialer struct {
 	host      string
+	stun      string
 	tlsConfig *tls.Config
 	dialFn    func() (conn net.Conn, err error)
 }
 
-func (d *dialer) init(c *Client, remote string) (err error) {
+func (d *dialer) init(c *Client, remote string, stun string) (err error) {
 	var u *url.URL
 	u, err = url.Parse(remote)
 	if err != nil {
 		err = fmt.Errorf("remote url (-remote option) '%s' is invalid, cause %s", remote, err.Error())
 		return
 	}
+	d.stun = stun
+	c.Logger.Info().Str("remote", remote).Str("stun", stun).Msg("remote url")
 	switch u.Scheme {
 	case "tls":
 		if len(u.Port()) < 1 {
@@ -118,7 +121,7 @@ func (d *dialer) init(c *Client, remote string) (err error) {
 }
 
 func (d *dialer) initWithRemote(c *Client) (err error) {
-	return d.init(c, c.config.Remote)
+	return d.init(c, c.config.Remote, c.config.RemoteSTUN)
 }
 
 func (d *dialer) initWithRemoteAPI(c *Client) (err error) {
@@ -150,7 +153,13 @@ func (d *dialer) initWithRemoteAPI(c *Client) (err error) {
 	if err != nil {
 		return
 	}
-	err = d.init(c, addr)
+	stunAddr, err := jsonparser.GetString(r, "stunAddress")
+	if err != nil {
+		if err != jsonparser.KeyPathNotFoundError {
+			return
+		}
+	}
+	err = d.init(c, addr, stunAddr)
 	return
 }
 
@@ -252,6 +261,7 @@ func (c *Client) initConn(d dialer) (result *conn, err error) {
 		return
 	}
 	result = newConn(conn, c)
+	result.stuns = append(result.stuns, d.stun)
 	err = result.init()
 	if err != nil {
 		result.Close()
