@@ -8,7 +8,7 @@ import (
 )
 
 func peekTLSHost(reader *bufio.Reader) ([]byte, error) {
-	_, err := reader.Peek(42) // 保证 Client Hello 已经被缓冲，不然 bufLen 可能为 0
+	_, err := reader.Peek(1) // 保证 Client Hello 已经被缓冲，否则 bufLen 可能为 0
 	bufLen := reader.Buffered()
 	buf, err := reader.Peek(bufLen)
 	if err != nil {

@@ -95,7 +95,7 @@ func (s *Server) tlsListen() (err error) {
 	}
 	s.tlsListener = l
 	go s.acceptLoop(l, func(c *conn) {
-		c.handle()
+		c.handle(c.handleHTTP)
 	})
 	return
 }
@@ -109,7 +109,7 @@ func (s *Server) listen() (err error) {
 	}
 	s.listener = l
 	go s.acceptLoop(l, func(c *conn) {
-		c.handle()
+		c.handle(c.handleHTTP)
 	})
 	return
 }
@@ -123,7 +123,7 @@ func (s *Server) sniListen() (err error) {
 	}
 	s.sniListener = l
 	go s.acceptLoop(l, func(c *conn) {
-		c.handleSNI()
+		c.handle(c.handleSNI)
 	})
 	return
 }
@@ -248,6 +248,7 @@ func (s *Server) Start() (err error) {
 		if err != nil {
 			return
 		}
+		listening = true
 	}
 	if !listening {
 		err = errors.New("no services is providing, please check the config")

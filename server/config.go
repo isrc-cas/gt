@@ -3,11 +3,12 @@ package server
 import (
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/isrc-cas/gt/config"
 	"github.com/isrc-cas/gt/predef"
 	"github.com/isrc-cas/gt/server/sync"
 	"github.com/rs/zerolog"
-	"time"
 )
 
 // Config is a server config.
@@ -80,7 +81,7 @@ func defaultConfig() Config {
 
 			HTTPMUXHeader: "Host",
 
-			TURNAddr:           "3478",
+			// TURNAddr:           "3478",
 			ChannelBindTimeout: 2 * time.Minute,
 		},
 	}
